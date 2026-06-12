@@ -177,13 +177,37 @@ const ENCODER_CANDIDATES: &[(&str, VideoEncoder)] = &[
     ("mfh264enc", VideoEncoder::MediaFoundation),
 ];
 
+/// Localise un outil `GStreamer` (`gst-launch-1.0`, `gst-inspect-1.0`).
+///
+/// Sous Windows, l'installeur officiel ne met pas son dossier `bin` dans le
+/// PATH : on regarde la variable d'environnement qu'il pose, puis le chemin
+/// d'installation par défaut, avant de retomber sur le PATH.
+fn gst_tool(name: &str) -> std::path::PathBuf {
+    #[cfg(windows)]
+    {
+        let exe = format!("{name}.exe");
+        let roots = [
+            std::env::var_os("GSTREAMER_1_0_ROOT_MSVC_X86_64"),
+            std::env::var_os("GSTREAMER_1_0_ROOT_X86_64"),
+            Some(std::ffi::OsString::from(r"C:\gstreamer\1.0\msvc_x86_64")),
+        ];
+        for root in roots.into_iter().flatten() {
+            let candidate = std::path::Path::new(&root).join("bin").join(&exe);
+            if candidate.is_file() {
+                return candidate;
+            }
+        }
+    }
+    std::path::PathBuf::from(name)
+}
+
 /// Détecte le meilleur encodeur disponible en interrogeant `GStreamer`.
 /// Le résultat dépend de la machine, pas de la session : il pourrait être
 /// mis en cache, mais l'appel (~50 ms) au démarrage d'un enregistrement
 /// reste négligeable et suit les installations/désinstallations de plugins.
 pub async fn detect_encoder() -> VideoEncoder {
     for &(element, encoder) in ENCODER_CANDIDATES {
-        let found = Command::new("gst-inspect-1.0")
+        let found = Command::new(gst_tool("gst-inspect-1.0"))
             .args(["--exists", element])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -353,7 +377,7 @@ impl Recording {
             .context("impossible de créer le journal gstreamer")?;
         let log_err = log.try_clone().context("clonage du journal gstreamer")?;
 
-        let mut cmd = Command::new("gst-launch-1.0");
+        let mut cmd = Command::new(gst_tool("gst-launch-1.0"));
         cmd.args(&args)
             .current_dir(&cfg.output_dir)
             .stdin(Stdio::null())
@@ -398,9 +422,9 @@ impl Recording {
             }
         }
 
-        let child = cmd.spawn().context(
-            "impossible de lancer gst-launch-1.0 (GStreamer installé et dans le PATH ?)",
-        )?;
+        let child = cmd
+            .spawn()
+            .context("impossible de lancer gst-launch-1.0 (runtime GStreamer installé ?)")?;
 
         #[cfg(windows)]
         let job = child

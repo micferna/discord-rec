@@ -85,8 +85,10 @@ Le même binaire fonctionne sous Windows avec des mécanismes natifs :
 
 Prérequis : installer le **runtime GStreamer MSVC ≥ 1.22**
 ([gstreamer.freedesktop.org](https://gstreamer.freedesktop.org/download/),
-paquet *runtime*, installation « Complete ») et ajouter son dossier `bin`
-au `PATH`. L'installeur `.exe` (NSIS) est attaché à chaque release.
+paquet *runtime*, choisir l'installation « **Complete** »). Pas besoin de
+toucher au `PATH` : l'app localise GStreamer toute seule (variable
+d'environnement de l'installeur ou `C:\gstreamer\`). Installeurs `.msi` et
+`.exe` attachés à chaque release.
 
 > ⚠️ Le support Windows est compilé et vérifié en CI mais encore peu testé
 > en conditions réelles — les retours sont bienvenus dans les issues.
