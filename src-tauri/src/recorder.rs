@@ -31,8 +31,17 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 pub enum VideoSpec {
     /// Capture directe de la fenêtre Discord sous `XWayland` — aucun portail.
+    /// `width`/`height` : taille de la fenêtre au démarrage, pour épingler
+    /// la résolution du pipeline (un redimensionnement en cours
+    /// d'enregistrement est alors absorbé par `videoscale` au lieu de faire
+    /// échouer la renégociation de l'encodeur).
     #[cfg(unix)]
-    X11Window { xid: u64, framerate: u32 },
+    X11Window {
+        xid: u64,
+        framerate: u32,
+        width: u32,
+        height: u32,
+    },
     /// Flux du portail Wayland (popup au premier choix, jeton ensuite).
     #[cfg(unix)]
     Portal {
@@ -40,9 +49,31 @@ pub enum VideoSpec {
         node_id: u32,
         guard: crate::portal::SessionGuard,
     },
-    /// Fenêtre Discord via Windows Graphics Capture.
+    /// Fenêtre Discord via Windows Graphics Capture (même rôle de
+    /// `width`/`height` que pour X11).
     #[cfg(windows)]
-    WinWindow { hwnd: u64, framerate: u32 },
+    WinWindow {
+        hwnd: u64,
+        framerate: u32,
+        width: u32,
+        height: u32,
+    },
+}
+
+impl VideoSpec {
+    /// Résolution épinglée pour la sortie encodée (dimensions paires,
+    /// exigées par les encodeurs H.264 en 4:2:0).
+    fn pinned_size(&self) -> Option<(u32, u32)> {
+        let (w, h) = match self {
+            #[cfg(unix)]
+            Self::X11Window { width, height, .. } => (*width, *height),
+            #[cfg(unix)]
+            Self::Portal { .. } => return None,
+            #[cfg(windows)]
+            Self::WinWindow { width, height, .. } => (*width, *height),
+        };
+        Some((w & !1, h & !1))
+    }
 }
 
 pub struct Recording {
@@ -227,7 +258,7 @@ fn video_branch(
 ) {
     match spec {
         #[cfg(unix)]
-        VideoSpec::X11Window { xid, framerate } => {
+        VideoSpec::X11Window { xid, framerate, .. } => {
             args.push("ximagesrc".into());
             args.push(format!("xid={xid}"));
             args.push("use-damage=0".into());
@@ -242,7 +273,9 @@ fn video_branch(
             args.push("do-timestamp=true".into());
         }
         #[cfg(windows)]
-        VideoSpec::WinWindow { hwnd, framerate } => {
+        VideoSpec::WinWindow {
+            hwnd, framerate, ..
+        } => {
             // Windows Graphics Capture d'une fenêtre précise (gst ≥ 1.22).
             args.push("d3d11screencapturesrc".into());
             args.push(format!("window-handle={hwnd}"));
@@ -255,6 +288,15 @@ fn video_branch(
     }
     for token in ["!", "queue", "!", "videoconvert", "!"] {
         args.push(token.into());
+    }
+    // Résolution épinglée : si la fenêtre est redimensionnée en cours
+    // d'enregistrement, videoscale absorbe le changement de caps au lieu de
+    // le propager à l'encodeur (qui échouerait).
+    if let Some((width, height)) = spec.pinned_size() {
+        args.push("videoscale".into());
+        args.push("!".into());
+        args.push(format!("video/x-raw,width={width},height={height}"));
+        args.push("!".into());
     }
     encoder.push_args(args, bitrate_kbps);
     for token in ["!", "h264parse", "!", "queue", "!", "mux."] {

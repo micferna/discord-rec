@@ -76,11 +76,13 @@ async fn acquire_video(shared: &Shared, cfg: &Config) -> Option<VideoSpec> {
     // 1) Capture directe de la fenêtre Discord via XWayland : aucun
     //    portail, aucune popup. C'est le chemin normal.
     match crate::x11::find_discord_window().await {
-        Ok(Some(xid)) => {
+        Ok(Some(win)) => {
             shared.set_error(None);
             return Some(VideoSpec::X11Window {
-                xid,
+                xid: win.xid,
                 framerate: cfg.framerate,
+                width: win.width,
+                height: win.height,
             });
         }
         Ok(None) => {}
@@ -113,11 +115,13 @@ async fn acquire_video(shared: &Shared, cfg: &Config) -> Option<VideoSpec> {
 #[cfg(windows)]
 async fn acquire_video(shared: &Shared, cfg: &Config) -> Option<VideoSpec> {
     match tokio::task::spawn_blocking(crate::win::window::find_discord_window).await {
-        Ok(Some(hwnd)) => {
+        Ok(Some(win)) => {
             shared.set_error(None);
             Some(VideoSpec::WinWindow {
-                hwnd,
+                hwnd: win.hwnd,
                 framerate: cfg.framerate,
+                width: win.width,
+                height: win.height,
             })
         }
         Ok(None) => {

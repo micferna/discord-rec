@@ -108,9 +108,10 @@ faux positifs). Voir aussi `SECURITY.md`.
 
 ## Limites connues
 
-- Si la fenêtre Discord est redimensionnée pendant un enregistrement, le
-  pipeline vidéo peut s'interrompre ; le service redémarre alors un nouvel
-  enregistrement automatiquement (~10 s de trou).
+- La résolution vidéo est figée à la taille de la fenêtre au début de
+  l'enregistrement : un redimensionnement en cours de session est absorbé
+  (l'image est remise à l'échelle, légère déformation possible si le ratio
+  change) au lieu d'interrompre le pipeline.
 - La capture X11 enregistre la fenêtre telle qu'elle est rendue : si elle est
   minimisée pendant le vocal, les images peuvent se figer (l'audio continue).
 - L'encodeur H.264 est choisi automatiquement : **NVENC** (GPU NVIDIA,

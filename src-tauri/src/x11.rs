@@ -10,7 +10,17 @@ use anyhow::{Context, Result};
 /// Surface minimale (px²) pour écarter les fenêtres techniques d'Electron.
 const MIN_AREA: u64 = 200_000;
 
-pub async fn find_discord_window() -> Result<Option<u64>> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DiscordWindow {
+    pub xid: u64,
+    /// Taille au moment de la détection : sert à épingler la résolution du
+    /// pipeline pour survivre aux redimensionnements en cours
+    /// d'enregistrement.
+    pub width: u32,
+    pub height: u32,
+}
+
+pub async fn find_discord_window() -> Result<Option<DiscordWindow>> {
     let out = tokio::process::Command::new("xwininfo")
         .args(["-root", "-tree", "-int"])
         .stdin(std::process::Stdio::null())
@@ -24,10 +34,11 @@ pub async fn find_discord_window() -> Result<Option<u64>> {
     Ok(parse_xwininfo_tree(&String::from_utf8_lossy(&out.stdout)))
 }
 
-/// Extrait de la sortie de `xwininfo -root -tree -int` l'identifiant de la
-/// plus grande fenêtre de classe `discord`, si sa surface est plausible.
-fn parse_xwininfo_tree(text: &str) -> Option<u64> {
-    let mut best: Option<(u64, u64)> = None; // (xid, surface)
+/// Extrait de la sortie de `xwininfo -root -tree -int` la plus grande
+/// fenêtre de classe `discord` (identifiant + géométrie), si sa surface est
+/// plausible.
+fn parse_xwininfo_tree(text: &str) -> Option<DiscordWindow> {
+    let mut best: Option<DiscordWindow> = None;
     for line in text.lines() {
         // Format : `  <id> "titre": ("instance" "classe")  <W>x<H>+X+Y  +X+Y`
         if !line.to_ascii_lowercase().contains("(\"discord\"") {
@@ -40,24 +51,25 @@ fn parse_xwininfo_tree(text: &str) -> Option<u64> {
         else {
             continue;
         };
-        let Some(area) = line.split_whitespace().find_map(|t| {
+        let Some((width, height)) = line.split_whitespace().find_map(|t| {
             let (w, rest) = t.split_once('x')?;
             let (h, _) = rest.split_once('+')?;
-            Some(w.parse::<u64>().ok()? * h.parse::<u64>().ok()?)
+            Some((w.parse::<u32>().ok()?, h.parse::<u32>().ok()?))
         }) else {
             continue;
         };
-        if best.is_none_or(|(_, a)| area > a) {
-            best = Some((xid, area));
+        let area = u64::from(width) * u64::from(height);
+        let best_area = best.map_or(0, |b| u64::from(b.width) * u64::from(b.height));
+        if area > best_area {
+            best = Some(DiscordWindow { xid, width, height });
         }
     }
-    best.filter(|&(_, area)| area >= MIN_AREA)
-        .map(|(xid, _)| xid)
+    best.filter(|b| u64::from(b.width) * u64::from(b.height) >= MIN_AREA)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::parse_xwininfo_tree;
+    use super::{parse_xwininfo_tree, DiscordWindow};
 
     const SAMPLE: &str = r#"
 xwininfo: Window id: 1320 (the root window) (has no name)
@@ -73,8 +85,15 @@ xwininfo: Window id: 1320 (the root window) (has no name)
 "#;
 
     #[test]
-    fn picks_largest_discord_window() {
-        assert_eq!(parse_xwininfo_tree(SAMPLE), Some(8_388_618));
+    fn picks_largest_discord_window_with_geometry() {
+        assert_eq!(
+            parse_xwininfo_tree(SAMPLE),
+            Some(DiscordWindow {
+                xid: 8_388_618,
+                width: 3840,
+                height: 2160
+            })
+        );
     }
 
     #[test]
