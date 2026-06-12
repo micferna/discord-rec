@@ -94,10 +94,14 @@ pub async fn acquire(restore_token: Option<String>) -> Result<VideoSource> {
         }
     });
 
-    let (fd, node_id, restore_token) = rx_res
-        .await
-        .context("la tâche du portail s'est interrompue")?
-        .context("le portail ScreenCast a refusé")?;
+    // Si l'utilisateur laisse la popup sans réponse, on ne bloque pas le
+    // service indéfiniment : au-delà du délai, repli audio seul.
+    let (fd, node_id, restore_token) =
+        tokio::time::timeout(std::time::Duration::from_secs(120), rx_res)
+            .await
+            .context("popup du portail restée sans réponse (120 s)")?
+            .context("la tâche du portail s'est interrompue")?
+            .context("le portail ScreenCast a refusé")?;
 
     Ok(VideoSource {
         fd,

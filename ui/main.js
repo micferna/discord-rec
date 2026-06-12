@@ -68,6 +68,7 @@ async function loadConfig() {
   $("cfg-video").checked = cfg.video;
   $("cfg-vbr").value = cfg.video_bitrate_kbps;
   $("cfg-abr").value = cfg.audio_bitrate_kbps;
+  $("cfg-fps").value = cfg.framerate;
   $("cfg-debounce").value = cfg.stop_debounce_s;
 }
 
@@ -89,6 +90,7 @@ $("settings").addEventListener("submit", async (e) => {
         video: $("cfg-video").checked,
         video_bitrate_kbps: Number($("cfg-vbr").value),
         audio_bitrate_kbps: Number($("cfg-abr").value),
+        framerate: Number($("cfg-fps").value),
         stop_debounce_s: Number($("cfg-debounce").value),
       },
     });

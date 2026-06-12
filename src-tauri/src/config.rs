@@ -10,6 +10,8 @@ pub struct Config {
     pub video: bool,
     pub video_bitrate_kbps: u32,
     pub audio_bitrate_kbps: u32,
+    /// Images/s pour la capture X11 directe.
+    pub framerate: u32,
     /// Secondes sans vocal avant d'arrêter l'enregistrement (anti-flap reconnexion).
     pub stop_debounce_s: u32,
     /// Jeton du portail Wayland pour réutiliser la fenêtre choisie sans redemander.
@@ -24,8 +26,9 @@ impl Default for Config {
         Self {
             output_dir: videos.join("discord-rec"),
             video: true,
-            video_bitrate_kbps: 4000,
+            video_bitrate_kbps: 8000,
             audio_bitrate_kbps: 128,
+            framerate: 30,
             stop_debounce_s: 3,
             restore_token: None,
         }
@@ -37,6 +40,7 @@ impl Config {
     pub fn sanitize(&mut self) {
         self.video_bitrate_kbps = self.video_bitrate_kbps.clamp(500, 20_000);
         self.audio_bitrate_kbps = self.audio_bitrate_kbps.clamp(32, 510);
+        self.framerate = self.framerate.clamp(5, 60);
         self.stop_debounce_s = self.stop_debounce_s.clamp(1, 120);
     }
 }

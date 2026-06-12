@@ -5,6 +5,7 @@ mod portal;
 mod pw;
 mod recorder;
 mod service;
+mod x11;
 
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
@@ -26,6 +27,7 @@ struct UiConfig {
     video: bool,
     video_bitrate_kbps: u32,
     audio_bitrate_kbps: u32,
+    framerate: u32,
     stop_debounce_s: u32,
 }
 
@@ -54,6 +56,7 @@ fn get_config(shared: SharedState) -> UiConfig {
         video: cfg.video,
         video_bitrate_kbps: cfg.video_bitrate_kbps,
         audio_bitrate_kbps: cfg.audio_bitrate_kbps,
+        framerate: cfg.framerate,
         stop_debounce_s: cfg.stop_debounce_s,
     }
 }
@@ -68,6 +71,7 @@ fn set_config(shared: SharedState, ui: UiConfig) -> Result<(), String> {
     cfg.video = ui.video;
     cfg.video_bitrate_kbps = ui.video_bitrate_kbps;
     cfg.audio_bitrate_kbps = ui.audio_bitrate_kbps;
+    cfg.framerate = ui.framerate;
     cfg.stop_debounce_s = ui.stop_debounce_s;
     cfg.sanitize();
     config::save(&cfg).map_err(|e| format!("{e:#}"))

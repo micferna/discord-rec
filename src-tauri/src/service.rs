@@ -13,10 +13,12 @@ use tauri::{AppHandle, Emitter};
 use crate::config::{self, Config};
 use crate::portal;
 use crate::pw;
-use crate::recorder::{Recording, VideoInput};
+use crate::recorder::{Recording, VideoSpec};
+use crate::x11;
 
-/// Ticks de pause après un échec de démarrage, pour ne pas spammer le portail.
-const RETRY_COOLDOWN_TICKS: u32 = 30;
+/// Ticks de pause après un échec de démarrage (laisse le temps à la cause
+/// de disparaître sans spammer le portail en cas de repli Wayland).
+const RETRY_COOLDOWN_TICKS: u32 = 10;
 const TICK: Duration = Duration::from_secs(1);
 
 #[derive(Clone, Serialize, Default)]
@@ -53,6 +55,12 @@ impl Shared {
     }
 
     fn set_error(&self, msg: Option<String>) {
+        if let Some(m) = &msg {
+            eprintln!(
+                "[discord-rec {}] {m}",
+                chrono::Local::now().format("%H:%M:%S")
+            );
+        }
         self.status.lock().expect("mutex status").last_error = msg;
     }
 }
@@ -71,35 +79,52 @@ async fn start_recording(shared: &Shared, snap: &pw::Snapshot) -> Result<Recordi
             cfg.output_dir.display()
         )
     })?;
-    let file_name = format!(
-        "discord-{}.mkv",
-        chrono::Local::now().format("%Y-%m-%d_%H-%M-%S")
-    );
-
     let mut video = None;
     if cfg.video {
-        match portal::acquire(cfg.restore_token.clone()).await {
-            Ok(src) => {
-                if src.restore_token != cfg.restore_token {
-                    let mut locked = shared.config.lock().expect("mutex config");
-                    locked.restore_token.clone_from(&src.restore_token);
-                    let _ = config::save(&locked);
-                }
-                video = Some(VideoInput {
-                    fd: src.fd,
-                    node_id: src.node_id,
-                    guard: src.guard,
+        // 1) Capture directe de la fenêtre Discord via XWayland : aucun
+        //    portail, aucune popup. C'est le chemin normal.
+        match x11::find_discord_window().await {
+            Ok(Some(xid)) => {
+                video = Some(VideoSpec::X11Window {
+                    xid,
+                    framerate: cfg.framerate,
                 });
                 shared.set_error(None);
             }
-            Err(e) => {
-                // Pas de vidéo (refus, annulation…) : on enregistre l'audio
-                // quand même plutôt que de perdre la session.
-                shared.set_error(Some(format!("vidéo indisponible ({e:#}) — audio seul")));
+            Ok(None) => {}
+            Err(e) => shared.set_error(Some(format!("recherche fenêtre X11 : {e:#}"))),
+        }
+        // 2) Repli : portail Wayland (popup au premier choix uniquement).
+        if video.is_none() {
+            match portal::acquire(cfg.restore_token.clone()).await {
+                Ok(src) => {
+                    if src.restore_token != cfg.restore_token {
+                        let mut locked = shared.config.lock().expect("mutex config");
+                        locked.restore_token.clone_from(&src.restore_token);
+                        let _ = config::save(&locked);
+                    }
+                    video = Some(VideoSpec::Portal {
+                        fd: src.fd,
+                        node_id: src.node_id,
+                        guard: src.guard,
+                    });
+                    shared.set_error(None);
+                }
+                Err(e) => {
+                    // Pas de vidéo (refus, annulation…) : on enregistre l'audio
+                    // quand même plutôt que de perdre la session.
+                    shared.set_error(Some(format!("vidéo indisponible ({e:#}) — audio seul")));
+                }
             }
         }
     }
 
+    // Après le portail (qui peut attendre l'utilisateur), pour que
+    // l'horodatage du fichier corresponde au vrai début.
+    let file_name = format!(
+        "discord-{}.mkv",
+        chrono::Local::now().format("%Y-%m-%d_%H-%M-%S")
+    );
     Recording::start(&cfg, &file_name, snap.discord_out_serial, video)
 }
 

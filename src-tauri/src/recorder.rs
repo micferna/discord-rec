@@ -1,6 +1,7 @@
 //! Pipeline d'enregistrement : un processus `gst-launch-1.0` qui muxe dans un
-//! MKV jusqu'à trois flux `PipeWire` :
-//! - la fenêtre Discord (fd du portail Wayland), encodée en H.264 ;
+//! MKV jusqu'à trois flux :
+//! - la fenêtre Discord — en direct via X11/XWayland (`ximagesrc`, aucun
+//!   portail) ou, à défaut, via le portail Wayland — encodée en H.264 ;
 //! - la sortie audio de Discord (les autres participants), piste Opus 1 ;
 //! - le micro (source par défaut), piste Opus 2.
 //!
@@ -23,10 +24,15 @@ use crate::portal::SessionGuard;
 const CHILD_VIDEO_FD: i32 = 3;
 const STOP_GRACE: Duration = Duration::from_secs(10);
 
-pub struct VideoInput {
-    pub fd: OwnedFd,
-    pub node_id: u32,
-    pub guard: SessionGuard,
+pub enum VideoSpec {
+    /// Capture directe de la fenêtre Discord sous `XWayland` — aucun portail.
+    X11Window { xid: u64, framerate: u32 },
+    /// Flux du portail Wayland (popup au premier choix, jeton ensuite).
+    Portal {
+        fd: OwnedFd,
+        node_id: u32,
+        guard: SessionGuard,
+    },
 }
 
 pub struct Recording {
@@ -63,11 +69,22 @@ fn audio_branch(args: &mut Vec<String>, target_serial: Option<u64>, bitrate_kbps
     }
 }
 
-fn video_branch(args: &mut Vec<String>, node_id: u32, bitrate_kbps: u32) {
-    args.push("pipewiresrc".into());
-    args.push(format!("fd={CHILD_VIDEO_FD}"));
-    args.push(format!("path={node_id}"));
-    args.push("do-timestamp=true".into());
+fn video_branch(args: &mut Vec<String>, spec: &VideoSpec, bitrate_kbps: u32) {
+    match spec {
+        VideoSpec::X11Window { xid, framerate } => {
+            args.push("ximagesrc".into());
+            args.push(format!("xid={xid}"));
+            args.push("use-damage=0".into());
+            args.push("!".into());
+            args.push(format!("video/x-raw,framerate={framerate}/1"));
+        }
+        VideoSpec::Portal { node_id, .. } => {
+            args.push("pipewiresrc".into());
+            args.push(format!("fd={CHILD_VIDEO_FD}"));
+            args.push(format!("path={node_id}"));
+            args.push("do-timestamp=true".into());
+        }
+    }
     for token in ["!", "queue", "!", "videoconvert", "!", "x264enc"] {
         args.push(token.into());
     }
@@ -94,16 +111,16 @@ impl Recording {
         cfg: &Config,
         file_name: &str,
         discord_out_serial: Option<u64>,
-        video: Option<VideoInput>,
+        video: Option<VideoSpec>,
     ) -> Result<Self> {
         ensure!(
             discord_out_serial.is_some() || video.is_some(),
             "rien à enregistrer (aucun flux Discord trouvé)"
         );
 
-        let mut args: Vec<String> = vec!["-e".into(), "-q".into()];
-        if let Some(v) = &video {
-            video_branch(&mut args, v.node_id, cfg.video_bitrate_kbps);
+        let mut args: Vec<String> = vec!["-e".into()];
+        if let Some(spec) = &video {
+            video_branch(&mut args, spec, cfg.video_bitrate_kbps);
         }
         if let Some(serial) = discord_out_serial {
             audio_branch(&mut args, Some(serial), cfg.audio_bitrate_kbps);
@@ -116,19 +133,22 @@ impl Recording {
         args.push("filesink".into());
         args.push(format!("location={file_name}"));
 
+        // gst-launch écrit ses messages d'erreur sur stdout : on journalise
+        // les deux flux dans le même fichier.
         let log = std::fs::File::create(cfg.output_dir.join(".gstreamer.log"))
             .context("impossible de créer le journal gstreamer")?;
+        let log_err = log.try_clone().context("clonage du journal gstreamer")?;
 
         let mut cmd = Command::new("gst-launch-1.0");
         cmd.args(&args)
             .current_dir(&cfg.output_dir)
             .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::from(log))
+            .stdout(Stdio::from(log))
+            .stderr(Stdio::from(log_err))
             .kill_on_drop(true);
 
-        if let Some(v) = &video {
-            let raw = v.fd.as_raw_fd();
+        if let Some(VideoSpec::Portal { fd, .. }) = &video {
+            let raw = fd.as_raw_fd();
             // SAFETY: dup2/fcntl sont async-signal-safe, autorisés dans pre_exec.
             unsafe {
                 cmd.pre_exec(move || {
@@ -149,14 +169,15 @@ impl Recording {
         }
 
         let child = cmd.spawn().context("impossible de lancer gst-launch-1.0")?;
+        let has_video = video.is_some();
         let (video_fd, portal_session) = match video {
-            Some(v) => (Some(v.fd), Some(v.guard)),
-            None => (None, None),
+            Some(VideoSpec::Portal { fd, guard, .. }) => (Some(fd), Some(guard)),
+            Some(VideoSpec::X11Window { .. }) | None => (None, None),
         };
         Ok(Self {
             child,
             file: cfg.output_dir.join(file_name),
-            has_video: video_fd.is_some(),
+            has_video,
             started_at: SystemTime::now(),
             _video_fd: video_fd,
             _portal_session: portal_session,
