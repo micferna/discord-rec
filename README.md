@@ -6,7 +6,8 @@ démarre ; quand tu quittes, il s'arrête et le fichier est finalisé.
 
 - **Audio Discord uniquement** (les autres participants) — piste Opus 1
 - **Ton micro** — piste Opus 2 (pistes séparées, pratique pour le montage)
-- **Vidéo** : la fenêtre Discord seule, via le portail Wayland — H.264
+- **Vidéo** : la fenêtre Discord seule, capturée **directement via
+  X11/XWayland** (`ximagesrc`) — aucune popup, aucun portail — H.264
 - Conteneur **MKV** (lisible même si l'enregistrement est interrompu),
   un fichier horodaté par session dans `~/Vidéos/discord-rec/`
 
@@ -15,9 +16,11 @@ démarre ; quand tu quittes, il s'arrête et le fichier est finalisé.
 1. La boucle de service interroge PipeWire (`pw-dump`) chaque seconde.
    Quand Discord est en vocal, son moteur WebRTC expose un nœud
    `Stream/Input/Audio` en état `running` : c'est le déclencheur.
-2. Au démarrage d'un enregistrement, le portail `ScreenCast` fournit le flux
-   de la fenêtre Discord (au premier lancement, GNOME demande quelle fenêtre
-   capturer ; le choix est mémorisé via `restore_token`).
+2. Au démarrage d'un enregistrement, la fenêtre Discord est localisée dans
+   l'arbre X11 (`xwininfo`) — Discord/Electron tourne sous XWayland — et
+   capturée directement par `ximagesrc`. Si Discord passait un jour en
+   Wayland natif, repli automatique sur le portail `ScreenCast` (popup de
+   choix une fois, mémorisée via `restore_token`).
 3. Un processus `gst-launch-1.0` muxe les trois flux dans un MKV.
    À la sortie du vocal (anti-rebond configurable), SIGINT → EOS → fichier
    finalisé proprement.
@@ -67,7 +70,10 @@ cargo deny check                             # licences + doublons + avis
 ## Limites connues
 
 - Si la fenêtre Discord est redimensionnée pendant un enregistrement, le
-  pipeline vidéo peut s'interrompre (l'enregistrement audio redémarre alors
-  automatiquement après le délai de garde).
-- La capture suit la fenêtre choisie dans la popup du portail ; si Discord
-  est relancé, utiliser « Re-choisir la fenêtre ».
+  pipeline vidéo peut s'interrompre ; le service redémarre alors un nouvel
+  enregistrement automatiquement (~10 s de trou).
+- La capture X11 enregistre la fenêtre telle qu'elle est rendue : si elle est
+  minimisée pendant le vocal, les images peuvent se figer (l'audio continue).
+- L'encodage x264 4K consomme ~4-5 cœurs ; baisser FPS/bitrate dans les
+  réglages si besoin, ou installer `gstreamer1.0-vaapi` pour l'encodage
+  matériel (évolution possible).
