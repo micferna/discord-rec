@@ -1,6 +1,6 @@
-//! Boucle de surveillance : interroge `PipeWire` chaque seconde, démarre
-//! l'enregistrement à l'entrée en vocal, l'arrête (avec anti-rebond) à la
-//! sortie, et publie l'état vers l'interface.
+//! Boucle de surveillance : interroge l'état vocal de Discord chaque seconde,
+//! démarre l'enregistrement à l'entrée en vocal, l'arrête (avec anti-rebond)
+//! à la sortie, et publie l'état vers l'interface.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -10,11 +10,9 @@ use anyhow::{Context, Result};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
-use crate::config::{self, Config};
-use crate::portal;
-use crate::pw;
+use crate::config::Config;
 use crate::recorder::{self, Recording, VideoSpec};
-use crate::x11;
+use crate::voice;
 
 /// Ticks de pause après un échec de démarrage (laisse le temps à la cause
 /// de disparaître sans spammer le portail en cas de repli Wayland).
@@ -72,7 +70,68 @@ fn unix_ms(t: SystemTime) -> u64 {
         .unwrap_or_default()
 }
 
-async fn start_recording(shared: &Shared, snap: &pw::Snapshot) -> Result<Recording> {
+/// Choisit la source vidéo pour cette session ; `None` = audio seul.
+#[cfg(unix)]
+async fn acquire_video(shared: &Shared, cfg: &Config) -> Option<VideoSpec> {
+    // 1) Capture directe de la fenêtre Discord via XWayland : aucun
+    //    portail, aucune popup. C'est le chemin normal.
+    match crate::x11::find_discord_window().await {
+        Ok(Some(xid)) => {
+            shared.set_error(None);
+            return Some(VideoSpec::X11Window {
+                xid,
+                framerate: cfg.framerate,
+            });
+        }
+        Ok(None) => {}
+        Err(e) => shared.set_error(Some(format!("recherche fenêtre X11 : {e:#}"))),
+    }
+    // 2) Repli : portail Wayland (popup au premier choix uniquement).
+    match crate::portal::acquire(cfg.restore_token.clone()).await {
+        Ok(src) => {
+            if src.restore_token != cfg.restore_token {
+                let mut locked = shared.config.lock().expect("mutex config");
+                locked.restore_token.clone_from(&src.restore_token);
+                let _ = crate::config::save(&locked);
+            }
+            shared.set_error(None);
+            Some(VideoSpec::Portal {
+                fd: src.fd,
+                node_id: src.node_id,
+                guard: src.guard,
+            })
+        }
+        Err(e) => {
+            // Pas de vidéo (refus, annulation…) : on enregistre l'audio
+            // quand même plutôt que de perdre la session.
+            shared.set_error(Some(format!("vidéo indisponible ({e:#}) — audio seul")));
+            None
+        }
+    }
+}
+
+#[cfg(windows)]
+async fn acquire_video(shared: &Shared, cfg: &Config) -> Option<VideoSpec> {
+    match tokio::task::spawn_blocking(crate::win::window::find_discord_window).await {
+        Ok(Some(hwnd)) => {
+            shared.set_error(None);
+            Some(VideoSpec::WinWindow {
+                hwnd,
+                framerate: cfg.framerate,
+            })
+        }
+        Ok(None) => {
+            shared.set_error(Some("fenêtre Discord introuvable — audio seul".to_owned()));
+            None
+        }
+        Err(e) => {
+            shared.set_error(Some(format!("recherche fenêtre Discord : {e:#}")));
+            None
+        }
+    }
+}
+
+async fn start_recording(shared: &Shared, snap: &voice::Snapshot) -> Result<Recording> {
     let cfg = shared.config_snapshot();
     std::fs::create_dir_all(&cfg.output_dir).with_context(|| {
         format!(
@@ -80,57 +139,23 @@ async fn start_recording(shared: &Shared, snap: &pw::Snapshot) -> Result<Recordi
             cfg.output_dir.display()
         )
     })?;
-    let mut video = None;
-    if cfg.video {
-        // 1) Capture directe de la fenêtre Discord via XWayland : aucun
-        //    portail, aucune popup. C'est le chemin normal.
-        match x11::find_discord_window().await {
-            Ok(Some(xid)) => {
-                video = Some(VideoSpec::X11Window {
-                    xid,
-                    framerate: cfg.framerate,
-                });
-                shared.set_error(None);
-            }
-            Ok(None) => {}
-            Err(e) => shared.set_error(Some(format!("recherche fenêtre X11 : {e:#}"))),
-        }
-        // 2) Repli : portail Wayland (popup au premier choix uniquement).
-        if video.is_none() {
-            match portal::acquire(cfg.restore_token.clone()).await {
-                Ok(src) => {
-                    if src.restore_token != cfg.restore_token {
-                        let mut locked = shared.config.lock().expect("mutex config");
-                        locked.restore_token.clone_from(&src.restore_token);
-                        let _ = config::save(&locked);
-                    }
-                    video = Some(VideoSpec::Portal {
-                        fd: src.fd,
-                        node_id: src.node_id,
-                        guard: src.guard,
-                    });
-                    shared.set_error(None);
-                }
-                Err(e) => {
-                    // Pas de vidéo (refus, annulation…) : on enregistre l'audio
-                    // quand même plutôt que de perdre la session.
-                    shared.set_error(Some(format!("vidéo indisponible ({e:#}) — audio seul")));
-                }
-            }
-        }
-    }
+    let video = if cfg.video {
+        acquire_video(shared, &cfg).await
+    } else {
+        None
+    };
 
-    // Après le portail (qui peut attendre l'utilisateur), pour que
-    // l'horodatage du fichier corresponde au vrai début.
+    // Après l'acquisition vidéo (le portail peut attendre l'utilisateur),
+    // pour que l'horodatage du fichier corresponde au vrai début.
     let file_name = format!(
         "discord-{}.mkv",
         chrono::Local::now().format("%Y-%m-%d_%H-%M-%S")
     );
     let encoder = recorder::detect_encoder().await;
-    Recording::start(&cfg, &file_name, snap.discord_out_serial, video, encoder)
+    Recording::start(&cfg, &file_name, snap.audio_target, video, encoder)
 }
 
-fn publish(app: &AppHandle, shared: &Shared, snap: &pw::Snapshot, rec: Option<&Recording>) {
+fn publish(app: &AppHandle, shared: &Shared, snap: &voice::Snapshot, rec: Option<&Recording>) {
     let status = {
         let mut locked = shared.status.lock().expect("mutex status");
         locked.enabled = shared.enabled.load(Ordering::Relaxed);
@@ -172,11 +197,11 @@ pub async fn run(app: AppHandle, shared: Arc<Shared>) {
             return;
         }
 
-        let snap = match pw::snapshot().await {
+        let snap = match voice::snapshot().await {
             Ok(s) => s,
             Err(e) => {
-                shared.set_error(Some(format!("PipeWire : {e:#}")));
-                pw::Snapshot::default()
+                shared.set_error(Some(format!("détection vocale : {e:#}")));
+                voice::Snapshot::default()
             }
         };
 

@@ -10,11 +10,7 @@
 use anyhow::{ensure, Context, Result};
 use serde_json::Value;
 
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
-pub struct Snapshot {
-    pub in_voice: bool,
-    pub discord_out_serial: Option<u64>,
-}
+use crate::voice::Snapshot;
 
 pub async fn snapshot() -> Result<Snapshot> {
     let out = tokio::process::Command::new("pw-dump")
@@ -47,7 +43,7 @@ pub async fn snapshot() -> Result<Snapshot> {
             Some("Stream/Input/Audio") if running => snap.in_voice = true,
             // Préfère un flux actif ; sinon garde le premier trouvé.
             Some("Stream/Output/Audio") if running || !out_running => {
-                snap.discord_out_serial = props["object.serial"].as_u64();
+                snap.audio_target = props["object.serial"].as_u64();
                 out_running = running;
             }
             _ => {}

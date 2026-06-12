@@ -1,10 +1,16 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod config;
+#[cfg(unix)]
 mod portal;
+#[cfg(unix)]
 mod pw;
 mod recorder;
 mod service;
+mod voice;
+#[cfg(windows)]
+mod win;
+#[cfg(unix)]
 mod x11;
 
 use std::path::PathBuf;
@@ -125,7 +131,11 @@ fn list_recordings(shared: SharedState) -> Vec<RecFile> {
 fn open_recordings_dir(shared: SharedState) -> Result<(), String> {
     let dir = shared.config_snapshot().output_dir;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    std::process::Command::new("xdg-open")
+    #[cfg(unix)]
+    let opener = "xdg-open";
+    #[cfg(windows)]
+    let opener = "explorer";
+    std::process::Command::new(opener)
         .arg(&dir)
         .spawn()
         .map(drop)

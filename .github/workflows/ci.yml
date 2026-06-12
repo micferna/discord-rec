@@ -45,6 +45,32 @@ jobs:
       - name: Build release
         run: cargo build --release
 
+  quality-windows:
+    name: Lint, tests & build (Windows)
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: src-tauri
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Clippy (pedantic, zéro warning)
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Tests
+        run: cargo test
+
+      - name: Build release
+        run: cargo build --release
+
   security:
     name: Audit sécurité (RUSTSEC, licences, sources)
     runs-on: ubuntu-24.04

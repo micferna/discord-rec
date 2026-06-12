@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/micferna/discord-rec/actions/workflows/ci.yml/badge.svg)](https://github.com/micferna/discord-rec/actions/workflows/ci.yml)
 [![Licence: MIT](https://img.shields.io/badge/licence-MIT-green.svg)](LICENSE)
-![Plateforme](https://img.shields.io/badge/plateforme-Linux%20(Wayland%2BPipeWire)-blue)
+![Plateforme](https://img.shields.io/badge/plateforme-Linux%20%7C%20Windows%2010%2F11%20(b%C3%AAta)-blue)
 
 Enregistre **automatiquement** tes sessions vocales Discord sur Linux
 (Wayland + PipeWire) : dès que tu rejoins un salon vocal, un enregistrement
@@ -70,6 +70,26 @@ cargo deny check                             # licences + doublons + avis
 - CSP stricte (`default-src 'self'`), aucune ressource distante dans l'UI.
 - Le fichier de config (`~/.config/discord-rec/config.json`, mode `600`)
   contient le jeton du portail ; il ne quitte jamais la machine.
+
+## Windows 10/11 (bêta)
+
+Le même binaire fonctionne sous Windows avec des mécanismes natifs :
+
+- **Détection vocale** : sessions audio WASAPI — Discord ouvre une session de
+  capture (micro) active quand tu es en vocal ;
+- **Audio Discord seul** : loopback WASAPI **ciblé par processus**
+  (`wasapi2src loopback-target-pid`, Windows 10 20H2 minimum) ;
+- **Vidéo** : fenêtre Discord via Windows Graphics Capture
+  (`d3d11screencapturesrc`) ;
+- **Encodeur** : NVENC > Quick Sync > AMF > Media Foundation > x264.
+
+Prérequis : installer le **runtime GStreamer MSVC ≥ 1.22**
+([gstreamer.freedesktop.org](https://gstreamer.freedesktop.org/download/),
+paquet *runtime*, installation « Complete ») et ajouter son dossier `bin`
+au `PATH`. L'installeur `.exe` (NSIS) est attaché à chaque release.
+
+> ⚠️ Le support Windows est compilé et vérifié en CI mais encore peu testé
+> en conditions réelles — les retours sont bienvenus dans les issues.
 
 ## Limites connues
 

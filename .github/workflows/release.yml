@@ -9,12 +9,23 @@ permissions:
 
 jobs:
   build:
-    name: Build & publication du .deb
-    runs-on: ubuntu-24.04
+    name: Build & publication (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            name: Linux .deb
+            bundles: deb
+          - os: windows-latest
+            name: Windows installeur NSIS
+            bundles: nsis
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v6
 
-      - name: Dépendances système Tauri
+      - name: Dépendances système Tauri (Linux)
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
@@ -34,4 +45,4 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: "Discord REC ${{ github.ref_name }}"
           releaseDraft: true
-          args: --bundles deb
+          args: --bundles ${{ matrix.bundles }}
