@@ -1,0 +1,334 @@
+/* ───────────────────────────────────────────────────────────────
+   DISCORD REC — console d'enregistrement façon régie broadcast
+   ─────────────────────────────────────────────────────────────── */
+
+:root {
+  --bg: #131214;
+  --bg-raise: #1b1a1e;
+  --bg-inset: #0d0c0e;
+  --line: #2a282e;
+  --ink: #d8d4cc;
+  --ink-dim: #7d7a74;
+  --red: #ff3b30;
+  --red-deep: #8e1410;
+  --amber: #ffb454;
+  --green: #5dd39e;
+  --mono: "JetBrains Mono", "Fira Code", "IBM Plex Mono", "DejaVu Sans Mono", ui-monospace, monospace;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body { height: 100%; }
+
+body {
+  font-family: var(--mono);
+  background:
+    repeating-linear-gradient(0deg, transparent 0 2px, rgb(255 255 255 / 0.012) 2px 4px),
+    radial-gradient(120% 90% at 50% 0%, #1c1a20 0%, var(--bg) 55%);
+  color: var(--ink);
+  font-size: 13px;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.console {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px 18px 14px;
+  min-height: 100vh;
+}
+
+/* ── En-tête : lampe tally + titre + interrupteur AUTO ────────── */
+
+.masthead {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.tally {
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  flex: none;
+  display: grid;
+  place-items: center;
+  background: var(--bg-inset);
+  border: 1px solid var(--line);
+  box-shadow: inset 0 2px 6px rgb(0 0 0 / 0.7);
+}
+
+.tally-core {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: #3a3438;
+  transition: background 0.3s, box-shadow 0.3s;
+}
+
+.tally.standby .tally-core {
+  background: var(--amber);
+  box-shadow: 0 0 10px rgb(255 180 84 / 0.5);
+}
+
+.tally.on .tally-core {
+  background: var(--red);
+  box-shadow: 0 0 14px var(--red), 0 0 40px rgb(255 59 48 / 0.45);
+  animation: tally-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes tally-pulse {
+  50% { box-shadow: 0 0 6px var(--red), 0 0 16px rgb(255 59 48 / 0.25); }
+}
+
+.masthead-text { flex: 1; min-width: 0; }
+
+h1 {
+  font-size: 17px;
+  letter-spacing: 0.32em;
+  font-weight: 700;
+}
+
+.headline {
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--ink-dim);
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* interrupteur AUTO */
+.power { display: flex; flex-direction: column; align-items: center; gap: 4px; cursor: pointer; }
+.power input { position: absolute; opacity: 0; pointer-events: none; }
+.power-track {
+  width: 40px; height: 20px; border-radius: 10px;
+  background: var(--bg-inset);
+  border: 1px solid var(--line);
+  display: block; position: relative;
+  transition: background 0.2s;
+}
+.power-knob {
+  position: absolute; top: 2px; left: 2px;
+  width: 14px; height: 14px; border-radius: 50%;
+  background: var(--ink-dim);
+  transition: transform 0.2s, background 0.2s;
+}
+.power input:checked + .power-track { background: var(--red-deep); }
+.power input:checked + .power-track .power-knob {
+  transform: translateX(20px);
+  background: var(--red);
+  box-shadow: 0 0 8px rgb(255 59 48 / 0.6);
+}
+.power-label { font-size: 9px; letter-spacing: 0.25em; color: var(--ink-dim); }
+
+/* ── Rampe de LEDs d'état ─────────────────────────────────────── */
+
+.meters { display: flex; gap: 10px; }
+
+.meter {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  background: var(--bg-raise);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.led {
+  width: 9px; height: 9px; border-radius: 50%;
+  background: #36333a;
+  box-shadow: inset 0 1px 2px rgb(0 0 0 / 0.6);
+  transition: background 0.25s, box-shadow 0.25s;
+}
+
+.meter.lit-green .led { background: var(--green); box-shadow: 0 0 8px rgb(93 211 158 / 0.55); }
+.meter.lit-red   .led { background: var(--red);   box-shadow: 0 0 8px rgb(255 59 48 / 0.6); }
+.meter.lit-amber .led { background: var(--amber); box-shadow: 0 0 8px rgb(255 180 84 / 0.55); }
+
+.meter-name { font-size: 10px; letter-spacing: 0.22em; color: var(--ink-dim); }
+.meter.lit-green .meter-name, .meter.lit-red .meter-name, .meter.lit-amber .meter-name { color: var(--ink); }
+
+/* ── Platine : timecode + fichier courant ─────────────────────── */
+
+.deck {
+  background: var(--bg-inset);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 18px 16px 14px;
+  text-align: center;
+  box-shadow: inset 0 2px 10px rgb(0 0 0 / 0.5);
+}
+
+.timecode {
+  font-size: 40px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  font-variant-numeric: tabular-nums;
+  color: #4d4950;
+  text-shadow: none;
+  transition: color 0.3s;
+}
+
+.deck.live .timecode {
+  color: var(--red);
+  text-shadow: 0 0 18px rgb(255 59 48 / 0.35);
+}
+
+.deck-file {
+  margin-top: 8px;
+  font-size: 10px;
+  color: var(--ink-dim);
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: rtl; /* montre la fin du chemin (nom du fichier) */
+}
+
+.deck-error {
+  margin-top: 10px;
+  font-size: 10px;
+  color: var(--amber);
+  border-top: 1px dashed var(--line);
+  padding-top: 8px;
+}
+
+/* ── Panneaux ─────────────────────────────────────────────────── */
+
+.panel {
+  background: var(--bg-raise);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.panel > summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 11px 14px;
+  font-size: 11px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+.panel > summary::-webkit-details-marker { display: none; }
+.panel > summary::before { content: "▸ "; }
+.panel[open] > summary::before { content: "▾ "; }
+.panel[open] > summary { color: var(--ink); border-bottom: 1px solid var(--line); }
+
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.panel-head h2 {
+  font-size: 11px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--ink);
+  font-weight: 700;
+}
+
+/* ── Réglages ─────────────────────────────────────────────────── */
+
+.settings { padding: 14px; display: flex; flex-direction: column; gap: 12px; }
+
+.field { display: flex; flex-direction: column; gap: 5px; flex: 1; }
+.field > span { font-size: 10px; letter-spacing: 0.12em; color: var(--ink-dim); }
+
+.field input[type="text"],
+.field input[type="number"] {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink);
+  background: var(--bg-inset);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 8px 9px;
+  outline: none;
+}
+.field input:focus { border-color: var(--red-deep); }
+
+.field-inline { flex-direction: row; align-items: center; gap: 8px; }
+.field-inline > span { font-size: 11px; letter-spacing: 0.04em; color: var(--ink); }
+.field-inline input { accent-color: var(--red); }
+
+.field-row { display: flex; gap: 10px; }
+
+.btn-row { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.btn {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink);
+  background: var(--bg-inset);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 8px 12px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.btn:hover { border-color: var(--ink-dim); }
+.btn:active { transform: translateY(1px); }
+
+.btn-accent { border-color: var(--red-deep); color: #ffb3ae; }
+.btn-accent:hover { background: var(--red-deep); color: #fff; }
+
+.btn-danger:hover { border-color: var(--red); color: var(--red); }
+
+.btn-small { padding: 5px 9px; }
+
+.hint { font-size: 10px; color: var(--ink-dim); min-height: 1em; }
+.hint.ok { color: var(--green); }
+.hint.err { color: var(--amber); }
+
+/* ── Liste des enregistrements ────────────────────────────────── */
+
+.tape-list {
+  list-style: none;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.tape-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 14px;
+  border-bottom: 1px solid rgb(255 255 255 / 0.03);
+  font-size: 11px;
+}
+.tape-list li:last-child { border-bottom: none; }
+
+.tape-name { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tape-meta { color: var(--ink-dim); flex: none; font-variant-numeric: tabular-nums; }
+
+.tape-empty { color: var(--ink-dim); justify-content: center; }
+
+.tape-list::-webkit-scrollbar { width: 8px; }
+.tape-list::-webkit-scrollbar-thumb { background: var(--line); border-radius: 4px; }
+
+/* ── Pied ─────────────────────────────────────────────────────── */
+
+.footer {
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding-top: 4px;
+}
+
+.footer-note { font-size: 9px; color: var(--ink-dim); letter-spacing: 0.05em; }

@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Discord REC
+Comment=Enregistrement automatique des sessions vocales Discord
+Exec=/home/ocb/Documents/REC-DISCORD-LiVE/src-tauri/target/release/discord-rec
+Icon=/home/ocb/Documents/REC-DISCORD-LiVE/src-tauri/icons/128x128.png
+Terminal=false
+Categories=AudioVideo;Recorder;
+X-GNOME-Autostart-enabled=true

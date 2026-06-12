@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Discord REC</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <main class="console">
+
+    <header class="masthead">
+      <div class="tally" id="tally" aria-hidden="true"><span class="tally-core"></span></div>
+      <div class="masthead-text">
+        <h1>DISCORD&nbsp;REC</h1>
+        <p id="headline" class="headline">en attente du vocal…</p>
+      </div>
+      <label class="power" title="Enregistrement automatique">
+        <input type="checkbox" id="enabled" checked />
+        <span class="power-track"><span class="power-knob"></span></span>
+        <span class="power-label">AUTO</span>
+      </label>
+    </header>
+
+    <section class="meters" aria-label="État">
+      <div class="meter" id="meter-voice">
+        <span class="led"></span><span class="meter-name">VOCAL</span>
+      </div>
+      <div class="meter" id="meter-rec">
+        <span class="led"></span><span class="meter-name">REC</span>
+      </div>
+      <div class="meter" id="meter-video">
+        <span class="led"></span><span class="meter-name">VIDÉO</span>
+      </div>
+    </section>
+
+    <section class="deck">
+      <div class="timecode" id="timecode">00:00:00</div>
+      <div class="deck-file" id="current-file">aucun enregistrement en cours</div>
+      <div class="deck-error" id="last-error" hidden></div>
+    </section>
+
+    <details class="panel">
+      <summary>Réglages</summary>
+      <form id="settings" class="settings">
+        <label class="field">
+          <span>Dossier de sortie</span>
+          <input type="text" id="cfg-dir" spellcheck="false" />
+        </label>
+        <label class="field field-inline">
+          <input type="checkbox" id="cfg-video" />
+          <span>Capturer la fenêtre Discord (vidéo)</span>
+        </label>
+        <div class="field-row">
+          <label class="field">
+            <span>Vidéo kb/s</span>
+            <input type="number" id="cfg-vbr" min="500" max="20000" step="250" />
+          </label>
+          <label class="field">
+            <span>Audio kb/s</span>
+            <input type="number" id="cfg-abr" min="32" max="510" step="16" />
+          </label>
+          <label class="field">
+            <span>Arrêt après (s)</span>
+            <input type="number" id="cfg-debounce" min="1" max="120" />
+          </label>
+        </div>
+        <div class="btn-row">
+          <button type="submit" class="btn btn-accent">Enregistrer les réglages</button>
+          <button type="button" class="btn" id="reset-token" title="Le prochain enregistrement redemandera quelle fenêtre capturer">Re-choisir la fenêtre</button>
+        </div>
+        <p class="hint" id="settings-msg"></p>
+      </form>
+    </details>
+
+    <section class="panel panel-open">
+      <header class="panel-head">
+        <h2>Enregistrements</h2>
+        <button type="button" class="btn btn-small" id="open-dir">Ouvrir le dossier</button>
+      </header>
+      <ul class="tape-list" id="recordings">
+        <li class="tape-empty">aucun fichier</li>
+      </ul>
+    </section>
+
+    <footer class="footer">
+      <span class="footer-note">fermer la fenêtre ≠ quitter — le service continue</span>
+      <button type="button" class="btn btn-danger" id="quit">Quitter</button>
+    </footer>
+
+  </main>
+  <script src="main.js"></script>
+</body>
+</html>

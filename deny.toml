@@ -1,0 +1,49 @@
+# cargo-deny : avis de sécurité (RUSTSEC), licences et doublons.
+# Usage : cargo deny check   (depuis src-tauri/)
+
+[advisories]
+version = 2
+yanked = "deny"
+# Tous des avis « unmaintained » (aucune vulnérabilité), hérités de la pile
+# GTK3 utilisée par Tauri/wry sur Linux — assumés en amont par le projet Tauri.
+ignore = [
+  "RUSTSEC-2024-0370", # proc-macro-error (transitif via gtk3-macros)
+  "RUSTSEC-2024-0411", # gdkwayland-sys   ┐
+  "RUSTSEC-2024-0412", # gdk              │
+  "RUSTSEC-2024-0413", # atk              │
+  "RUSTSEC-2024-0414", # gdkx11-sys       │
+  "RUSTSEC-2024-0415", # gtk              │ bindings GTK3 gtk-rs,
+  "RUSTSEC-2024-0416", # atk-sys          │ requis par Tauri sur Linux
+  "RUSTSEC-2024-0417", # gdkx11           │
+  "RUSTSEC-2024-0418", # gdk-sys          │
+  "RUSTSEC-2024-0419", # gtk3-macros      │
+  "RUSTSEC-2024-0420", # gtk-sys          ┘
+  "RUSTSEC-2025-0075", # unic-* (rust-unic) unmaintained, transitif Tauri
+  "RUSTSEC-2025-0080",
+  "RUSTSEC-2025-0081",
+  "RUSTSEC-2025-0098",
+  "RUSTSEC-2025-0100",
+]
+
+[licenses]
+version = 2
+allow = [
+  "MIT",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "MPL-2.0",
+  "Zlib",
+  "Unicode-3.0",
+  "CC0-1.0",
+  "BSL-1.0",
+]
+
+[bans]
+multiple-versions = "warn"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

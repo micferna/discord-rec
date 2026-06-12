@@ -1,0 +1,73 @@
+use std::{fs, path::PathBuf};
+
+use anyhow::{Context, Result};
+use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Config {
+    pub output_dir: PathBuf,
+    pub video: bool,
+    pub video_bitrate_kbps: u32,
+    pub audio_bitrate_kbps: u32,
+    /// Secondes sans vocal avant d'arrêter l'enregistrement (anti-flap reconnexion).
+    pub stop_debounce_s: u32,
+    /// Jeton du portail Wayland pour réutiliser la fenêtre choisie sans redemander.
+    pub restore_token: Option<String>,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        let videos = dirs::video_dir()
+            .or_else(|| dirs::home_dir().map(|h| h.join("Videos")))
+            .unwrap_or_else(|| PathBuf::from("."));
+        Self {
+            output_dir: videos.join("discord-rec"),
+            video: true,
+            video_bitrate_kbps: 4000,
+            audio_bitrate_kbps: 128,
+            stop_debounce_s: 3,
+            restore_token: None,
+        }
+    }
+}
+
+impl Config {
+    /// Borne les valeurs saisies par l'utilisateur dans des plages sûres.
+    pub fn sanitize(&mut self) {
+        self.video_bitrate_kbps = self.video_bitrate_kbps.clamp(500, 20_000);
+        self.audio_bitrate_kbps = self.audio_bitrate_kbps.clamp(32, 510);
+        self.stop_debounce_s = self.stop_debounce_s.clamp(1, 120);
+    }
+}
+
+fn config_path() -> Result<PathBuf> {
+    dirs::config_dir()
+        .map(|d| d.join("discord-rec").join("config.json"))
+        .context("dossier de configuration utilisateur introuvable")
+}
+
+pub fn load() -> Config {
+    let mut cfg: Config = config_path()
+        .ok()
+        .and_then(|p| fs::read(p).ok())
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_default();
+    cfg.sanitize();
+    cfg
+}
+
+pub fn save(cfg: &Config) -> Result<()> {
+    let path = config_path()?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(&path, serde_json::to_vec_pretty(cfg)?)?;
+    // Le fichier contient le jeton du portail : lecture pour l'utilisateur seul.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600))?;
+    }
+    Ok(())
+}
