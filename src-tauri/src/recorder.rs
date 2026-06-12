@@ -63,6 +63,11 @@ pub enum VideoSpec {
 impl VideoSpec {
     /// Résolution épinglée pour la sortie encodée (dimensions paires,
     /// exigées par les encodeurs H.264 en 4:2:0).
+    ///
+    /// `Option` car la variante Portal (Linux) n'expose pas de taille ;
+    /// sous Windows toutes les variantes en ont une et clippy voit un
+    /// emballage superflu — faux positif dû au `cfg`.
+    #[cfg_attr(windows, allow(clippy::unnecessary_wraps))]
     fn pinned_size(&self) -> Option<(u32, u32)> {
         let (w, h) = match self {
             #[cfg(unix)]
