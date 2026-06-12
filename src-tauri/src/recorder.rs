@@ -39,6 +39,7 @@ pub struct Recording {
     child: Child,
     pub file: PathBuf,
     pub has_video: bool,
+    pub encoder: VideoEncoder,
     pub started_at: SystemTime,
     // Conservés vivants pendant tout l'enregistrement.
     _video_fd: Option<OwnedFd>,
@@ -69,7 +70,79 @@ fn audio_branch(args: &mut Vec<String>, target_serial: Option<u64>, bitrate_kbps
     }
 }
 
-fn video_branch(args: &mut Vec<String>, spec: &VideoSpec, bitrate_kbps: u32) {
+/// Encodeur H.264 à utiliser, du plus léger au plus universel.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum VideoEncoder {
+    /// NVENC (GPU NVIDIA) : charge CPU quasi nulle.
+    Nvenc,
+    /// VA-API (GPU Intel/AMD) : charge CPU quasi nulle.
+    Vaapi,
+    /// x264 logiciel : disponible partout, coûteux en 4K.
+    X264,
+}
+
+/// Détecte le meilleur encodeur disponible en interrogeant `GStreamer`.
+/// Le résultat dépend de la machine, pas de la session : il pourrait être
+/// mis en cache, mais l'appel (~50 ms) au démarrage d'un enregistrement
+/// reste négligeable et suit les installations/désinstallations de plugins.
+pub async fn detect_encoder() -> VideoEncoder {
+    for (element, encoder) in [
+        ("nvh264enc", VideoEncoder::Nvenc),
+        ("vah264enc", VideoEncoder::Vaapi),
+    ] {
+        let found = tokio::process::Command::new("gst-inspect-1.0")
+            .args(["--exists", element])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .await
+            .is_ok_and(|s| s.success());
+        if found {
+            return encoder;
+        }
+    }
+    VideoEncoder::X264
+}
+
+impl VideoEncoder {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Nvenc => "NVENC (GPU NVIDIA)",
+            Self::Vaapi => "VA-API (GPU)",
+            Self::X264 => "x264 (CPU)",
+        }
+    }
+
+    fn push_args(self, args: &mut Vec<String>, bitrate_kbps: u32) {
+        match self {
+            Self::Nvenc => {
+                args.push("nvh264enc".into());
+                args.push(format!("bitrate={bitrate_kbps}"));
+                args.push("gop-size=120".into());
+            }
+            Self::Vaapi => {
+                args.push("vah264enc".into());
+                args.push(format!("bitrate={bitrate_kbps}"));
+                args.push("key-int-max=120".into());
+            }
+            Self::X264 => {
+                args.push("x264enc".into());
+                args.push(format!("bitrate={bitrate_kbps}"));
+                args.push("speed-preset=veryfast".into());
+                args.push("tune=zerolatency".into());
+                args.push("key-int-max=120".into());
+            }
+        }
+    }
+}
+
+fn video_branch(
+    args: &mut Vec<String>,
+    spec: &VideoSpec,
+    encoder: VideoEncoder,
+    bitrate_kbps: u32,
+) {
     match spec {
         VideoSpec::X11Window { xid, framerate } => {
             args.push("ximagesrc".into());
@@ -85,21 +158,11 @@ fn video_branch(args: &mut Vec<String>, spec: &VideoSpec, bitrate_kbps: u32) {
             args.push("do-timestamp=true".into());
         }
     }
-    for token in ["!", "queue", "!", "videoconvert", "!", "x264enc"] {
+    for token in ["!", "queue", "!", "videoconvert", "!"] {
         args.push(token.into());
     }
-    args.push(format!("bitrate={bitrate_kbps}"));
-    for token in [
-        "speed-preset=veryfast",
-        "tune=zerolatency",
-        "key-int-max=120",
-        "!",
-        "h264parse",
-        "!",
-        "queue",
-        "!",
-        "mux.",
-    ] {
+    encoder.push_args(args, bitrate_kbps);
+    for token in ["!", "h264parse", "!", "queue", "!", "mux."] {
         args.push(token.into());
     }
 }
@@ -112,6 +175,7 @@ impl Recording {
         file_name: &str,
         discord_out_serial: Option<u64>,
         video: Option<VideoSpec>,
+        encoder: VideoEncoder,
     ) -> Result<Self> {
         ensure!(
             discord_out_serial.is_some() || video.is_some(),
@@ -120,7 +184,7 @@ impl Recording {
 
         let mut args: Vec<String> = vec!["-e".into()];
         if let Some(spec) = &video {
-            video_branch(&mut args, spec, cfg.video_bitrate_kbps);
+            video_branch(&mut args, spec, encoder, cfg.video_bitrate_kbps);
         }
         if let Some(serial) = discord_out_serial {
             audio_branch(&mut args, Some(serial), cfg.audio_bitrate_kbps);
@@ -147,11 +211,20 @@ impl Recording {
             .stderr(Stdio::from(log_err))
             .kill_on_drop(true);
 
-        if let Some(VideoSpec::Portal { fd, .. }) = &video {
-            let raw = fd.as_raw_fd();
-            // SAFETY: dup2/fcntl sont async-signal-safe, autorisés dans pre_exec.
-            unsafe {
-                cmd.pre_exec(move || {
+        let portal_raw_fd = match &video {
+            Some(VideoSpec::Portal { fd, .. }) => Some(fd.as_raw_fd()),
+            _ => None,
+        };
+        // SAFETY: prctl/dup2/fcntl sont async-signal-safe, autorisés dans
+        // pre_exec.
+        unsafe {
+            cmd.pre_exec(move || {
+                // Si l'app meurt sans passer par stop(), gst reçoit SIGINT
+                // (→ EOS → MKV finalisé) au lieu de tourner orphelin.
+                if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGINT) == -1 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                if let Some(raw) = portal_raw_fd {
                     if raw == CHILD_VIDEO_FD {
                         // Déjà au bon numéro : il suffit de retirer CLOEXEC.
                         let flags = libc::fcntl(raw, libc::F_GETFD);
@@ -163,9 +236,9 @@ impl Recording {
                     } else if libc::dup2(raw, CHILD_VIDEO_FD) == -1 {
                         return Err(std::io::Error::last_os_error());
                     }
-                    Ok(())
-                });
-            }
+                }
+                Ok(())
+            });
         }
 
         let child = cmd.spawn().context("impossible de lancer gst-launch-1.0")?;
@@ -178,6 +251,7 @@ impl Recording {
             child,
             file: cfg.output_dir.join(file_name),
             has_video,
+            encoder,
             started_at: SystemTime::now(),
             _video_fd: video_fd,
             _portal_session: portal_session,

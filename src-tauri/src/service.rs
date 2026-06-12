@@ -13,7 +13,7 @@ use tauri::{AppHandle, Emitter};
 use crate::config::{self, Config};
 use crate::portal;
 use crate::pw;
-use crate::recorder::{Recording, VideoSpec};
+use crate::recorder::{self, Recording, VideoSpec};
 use crate::x11;
 
 /// Ticks de pause après un échec de démarrage (laisse le temps à la cause
@@ -27,6 +27,7 @@ pub struct Status {
     pub in_voice: bool,
     pub recording: bool,
     pub video_active: bool,
+    pub encoder: Option<String>,
     pub file: Option<String>,
     pub started_at_ms: Option<u64>,
     pub last_error: Option<String>,
@@ -125,7 +126,8 @@ async fn start_recording(shared: &Shared, snap: &pw::Snapshot) -> Result<Recordi
         "discord-{}.mkv",
         chrono::Local::now().format("%Y-%m-%d_%H-%M-%S")
     );
-    Recording::start(&cfg, &file_name, snap.discord_out_serial, video)
+    let encoder = recorder::detect_encoder().await;
+    Recording::start(&cfg, &file_name, snap.discord_out_serial, video, encoder)
 }
 
 fn publish(app: &AppHandle, shared: &Shared, snap: &pw::Snapshot, rec: Option<&Recording>) {
@@ -135,6 +137,9 @@ fn publish(app: &AppHandle, shared: &Shared, snap: &pw::Snapshot, rec: Option<&R
         locked.in_voice = snap.in_voice;
         locked.recording = rec.is_some();
         locked.video_active = rec.is_some_and(|r| r.has_video);
+        locked.encoder = rec
+            .filter(|r| r.has_video)
+            .map(|r| r.encoder.label().to_string());
         locked.file = rec.map(|r| r.file.display().to_string());
         locked.started_at_ms = rec.map(|r| unix_ms(r.started_at));
         locked.output_dir = shared

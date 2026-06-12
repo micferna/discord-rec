@@ -32,7 +32,7 @@ function render(status) {
   $("headline").textContent = !status.enabled
     ? "auto désactivé"
     : status.recording
-      ? "enregistrement en cours"
+      ? `enregistrement en cours${status.encoder ? ` — ${status.encoder}` : ""}`
       : status.in_voice
         ? "vocal détecté…"
         : "en attente du vocal…";
