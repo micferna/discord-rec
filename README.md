@@ -74,6 +74,7 @@ cargo deny check                             # licences + doublons + avis
   enregistrement automatiquement (~10 s de trou).
 - La capture X11 enregistre la fenêtre telle qu'elle est rendue : si elle est
   minimisée pendant le vocal, les images peuvent se figer (l'audio continue).
-- L'encodage x264 4K consomme ~4-5 cœurs ; baisser FPS/bitrate dans les
-  réglages si besoin, ou installer `gstreamer1.0-vaapi` pour l'encodage
-  matériel (évolution possible).
+- L'encodeur H.264 est choisi automatiquement : **NVENC** (GPU NVIDIA,
+  ~0,3 cœur en 4K) > **VA-API** (GPU Intel/AMD) > **x264** logiciel
+  (~4-5 cœurs en 4K — baisser FPS/bitrate dans ce cas). L'encodeur actif
+  est affiché dans l'en-tête de l'app pendant l'enregistrement.
