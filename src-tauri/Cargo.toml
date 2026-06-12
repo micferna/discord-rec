@@ -3,8 +3,10 @@ name = "discord-rec"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.87"
-description = "Enregistre automatiquement (audio + vidéo) les sessions vocales Discord via PipeWire et le portail Wayland"
+description = "Enregistre automatiquement (audio + vidéo) les sessions vocales Discord via PipeWire et X11/XWayland"
 license = "MIT"
+repository = "https://github.com/micferna/discord-rec"
+authors = ["micferna"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

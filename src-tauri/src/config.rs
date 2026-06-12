@@ -75,3 +75,32 @@ pub fn save(cfg: &Config) -> Result<()> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::Config;
+
+    #[test]
+    fn sanitize_clamps_user_values() {
+        let mut cfg = Config {
+            video_bitrate_kbps: 1,
+            audio_bitrate_kbps: 9999,
+            framerate: 0,
+            stop_debounce_s: 0,
+            ..Config::default()
+        };
+        cfg.sanitize();
+        assert_eq!(cfg.video_bitrate_kbps, 500);
+        assert_eq!(cfg.audio_bitrate_kbps, 510);
+        assert_eq!(cfg.framerate, 5);
+        assert_eq!(cfg.stop_debounce_s, 1);
+    }
+
+    #[test]
+    fn defaults_are_already_sane() {
+        let mut cfg = Config::default();
+        let before = serde_json::to_string(&cfg).expect("sérialisation");
+        cfg.sanitize();
+        assert_eq!(before, serde_json::to_string(&cfg).expect("sérialisation"));
+    }
+}

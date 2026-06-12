@@ -21,8 +21,12 @@ pub async fn find_discord_window() -> Result<Option<u64>> {
         // Pas de serveur X accessible : pas une erreur, juste pas de X11.
         return Ok(None);
     }
+    Ok(parse_xwininfo_tree(&String::from_utf8_lossy(&out.stdout)))
+}
 
-    let text = String::from_utf8_lossy(&out.stdout);
+/// Extrait de la sortie de `xwininfo -root -tree -int` l'identifiant de la
+/// plus grande fenêtre de classe `discord`, si sa surface est plausible.
+fn parse_xwininfo_tree(text: &str) -> Option<u64> {
     let mut best: Option<(u64, u64)> = None; // (xid, surface)
     for line in text.lines() {
         // Format : `  <id> "titre": ("instance" "classe")  <W>x<H>+X+Y  +X+Y`
@@ -47,7 +51,43 @@ pub async fn find_discord_window() -> Result<Option<u64>> {
             best = Some((xid, area));
         }
     }
-    Ok(best
-        .filter(|&(_, area)| area >= MIN_AREA)
-        .map(|(xid, _)| xid))
+    best.filter(|&(_, area)| area >= MIN_AREA)
+        .map(|(xid, _)| xid)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_xwininfo_tree;
+
+    const SAMPLE: &str = r#"
+xwininfo: Window id: 1320 (the root window) (has no name)
+
+  Root window id: 1320 (the root window) (has no name)
+  Parent window id: 0 (none)
+     20 children:
+     8388618 "scattered media, dakom - Discord": ("discord" "discord")  3840x2160+0+0  +0+0
+     12582923 "discord": ("discord" "Discord")  200x200+0+0  +0+0
+     12582915 "discord": ("discord" "Discord")  16x16+0+0  +0+0
+     12582913 "discord": ("discord" "Discord")  10x10+10+10  +10+10
+     6291467 "Mozilla Firefox": ("Navigator" "firefox")  2560x1380+0+0  +0+0
+"#;
+
+    #[test]
+    fn picks_largest_discord_window() {
+        assert_eq!(parse_xwininfo_tree(SAMPLE), Some(8_388_618));
+    }
+
+    #[test]
+    fn ignores_other_classes_and_tiny_windows() {
+        let only_helpers = r#"
+     12582923 "discord": ("discord" "Discord")  200x200+0+0  +0+0
+     6291467 "Discord - Mozilla Firefox": ("Navigator" "firefox")  2560x1380+0+0  +0+0
+"#;
+        assert_eq!(parse_xwininfo_tree(only_helpers), None);
+    }
+
+    #[test]
+    fn empty_tree_yields_none() {
+        assert_eq!(parse_xwininfo_tree(""), None);
+    }
 }

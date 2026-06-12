@@ -1,5 +1,9 @@
 # Discord REC
 
+[![CI](https://github.com/micferna/discord-rec/actions/workflows/ci.yml/badge.svg)](https://github.com/micferna/discord-rec/actions/workflows/ci.yml)
+[![Licence: MIT](https://img.shields.io/badge/licence-MIT-green.svg)](LICENSE)
+![Plateforme](https://img.shields.io/badge/plateforme-Linux%20(Wayland%2BPipeWire)-blue)
+
 Enregistre **automatiquement** tes sessions vocales Discord sur Linux
 (Wayland + PipeWire) : dès que tu rejoins un salon vocal, un enregistrement
 démarre ; quand tu quittes, il s'arrête et le fichier est finalisé.
@@ -48,7 +52,7 @@ proprement l'enregistrement en cours puis ferme l'application.
 ### Lancement automatique à l'ouverture de session
 
 ```sh
-cp discord-rec.desktop ~/.config/autostart/
+sed "s|@PREFIX@|$PWD|" discord-rec.desktop > ~/.config/autostart/discord-rec.desktop
 ```
 
 ## Qualité / sécurité
