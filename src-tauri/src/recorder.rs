@@ -56,7 +56,7 @@ pub struct Recording {
     _video_fd: Option<std::os::fd::OwnedFd>,
     #[cfg(unix)]
     _portal_session: Option<crate::portal::SessionGuard>,
-    /// Tue gst si l'app disparaît sans passer par stop() (kill-on-close).
+    /// Tue gst si l'app disparaît sans passer par `stop()` (kill-on-close).
     #[cfg(windows)]
     _job: Option<crate::win::job::JobHandle>,
 }

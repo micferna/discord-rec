@@ -27,7 +27,7 @@ pub(crate) fn is_discord_pid(pid: u32) -> bool {
             handle,
             PROCESS_NAME_WIN32,
             windows::core::PWSTR(buf.as_mut_ptr()),
-            &mut len,
+            &raw mut len,
         )
         .is_ok();
         let _ = CloseHandle(handle);

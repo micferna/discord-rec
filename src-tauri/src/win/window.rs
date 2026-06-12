@@ -27,12 +27,12 @@ unsafe extern "system" fn enum_callback(hwnd: HWND, lparam: LPARAM) -> BOOL {
         return BOOL(1);
     }
     let mut pid = 0u32;
-    unsafe { GetWindowThreadProcessId(hwnd, Some(&mut pid)) };
+    unsafe { GetWindowThreadProcessId(hwnd, Some(&raw mut pid)) };
     if !is_discord_pid(pid) {
         return BOOL(1);
     }
     let mut rect = RECT::default();
-    if unsafe { GetWindowRect(hwnd, &mut rect).is_err() } {
+    if unsafe { GetWindowRect(hwnd, &raw mut rect).is_err() } {
         return BOOL(1);
     }
     let area = i64::from(rect.right - rect.left) * i64::from(rect.bottom - rect.top);
