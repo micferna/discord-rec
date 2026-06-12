@@ -48,10 +48,10 @@ pub fn snapshot() -> Result<Snapshot> {
                     let Ok(session) = sessions.GetSession(j) else {
                         continue;
                     };
-                    let Ok(session2) = session.cast::<IAudioSessionControl2>() else {
+                    let Ok(details) = session.cast::<IAudioSessionControl2>() else {
                         continue;
                     };
-                    let Ok(pid) = session2.GetProcessId() else {
+                    let Ok(pid) = details.GetProcessId() else {
                         continue;
                     };
                     if !is_discord_pid(pid) {

@@ -1,7 +1,8 @@
 //! Localisation de la fenêtre principale de Discord (la plus grande fenêtre
 //! visible appartenant à un processus `Discord*.exe`).
 
-use windows::Win32::Foundation::{BOOL, HWND, LPARAM, RECT};
+use windows::core::BOOL;
+use windows::Win32::Foundation::{HWND, LPARAM, RECT};
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumWindows, GetWindowRect, GetWindowThreadProcessId, IsWindowVisible,
 };
