@@ -91,6 +91,21 @@ au `PATH`. L'installeur `.exe` (NSIS) est attaché à chaque release.
 > ⚠️ Le support Windows est compilé et vérifié en CI mais encore peu testé
 > en conditions réelles — les retours sont bienvenus dans les issues.
 
+### Antivirus / VirusTotal
+
+Les binaires ne sont pas signés (certificat payant) : quelques moteurs
+heuristiques peuvent afficher un faux positif « Generic ML/PUA », courant
+pour les installeurs récents sans réputation. Chaque artefact de release a
+une **attestation de provenance** prouvant qu'il a été compilé par la CI
+publique de ce dépôt :
+
+```sh
+gh attestation verify Discord.REC_X.Y.Z_x64-setup.exe --repo micferna/discord-rec
+```
+
+L'installeur **MSI** est fourni en alternative au NSIS (moins sujet aux
+faux positifs). Voir aussi `SECURITY.md`.
+
 ## Limites connues
 
 - Si la fenêtre Discord est redimensionnée pendant un enregistrement, le
