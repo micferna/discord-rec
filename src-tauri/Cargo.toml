@@ -1,6 +1,6 @@
 [package]
 name = "discord-rec"
-version = "0.2.3"
+version = "0.2.4"
 edition = "2021"
 rust-version = "1.87"
 description = "Enregistre automatiquement (audio + vidéo) les sessions vocales Discord via PipeWire et X11/XWayland"
@@ -31,6 +31,7 @@ windows = { version = "0.62", features = [
   "Win32_Media_Audio",
   "Win32_System_Com",
   "Win32_System_Com_StructuredStorage",
+  "Win32_System_Console",
   "Win32_Security",
   "Win32_System_JobObjects",
   "Win32_System_Threading",

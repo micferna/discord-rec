@@ -6,9 +6,9 @@
 //!   flux `PipeWire` ciblé (Linux) ou loopback WASAPI par processus (Windows) ;
 //! - le micro (source par défaut), piste Opus 2.
 //!
-//! Arrêt sous Linux : SIGINT → EOS (`-e`) → MKV finalisé, SIGKILL en dernier
-//! recours. Sous Windows : mux en mode `streamable` (lisible sans
-//! finalisation) puis arrêt du processus.
+//! Arrêt : SIGINT (Linux) ou Ctrl+Break console (Windows) → EOS (`-e`) →
+//! MKV finalisé avec son index de seek ; kill en dernier recours (le fichier
+//! tronqué reste lisible).
 
 use std::path::PathBuf;
 use std::process::Stdio;
@@ -25,9 +25,11 @@ const STOP_GRACE: Duration = Duration::from_secs(10);
 #[cfg(unix)]
 const CHILD_VIDEO_FD: i32 = 3;
 
-/// Pas de fenêtre console parasite pour le processus gst (`CREATE_NO_WINDOW`).
+/// Pas de fenêtre console parasite (`CREATE_NO_WINDOW`) et groupe de
+/// processus dédié (`CREATE_NEW_PROCESS_GROUP`) pour pouvoir cibler le
+/// Ctrl+Break de l'arrêt propre.
 #[cfg(windows)]
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+const CHILD_CREATION_FLAGS: u32 = 0x0800_0000 | 0x0000_0200;
 
 pub enum VideoSpec {
     /// Capture directe de la fenêtre Discord sous `XWayland` — aucun portail.
@@ -338,10 +340,6 @@ fn video_branch(
 fn mux_tokens(args: &mut Vec<String>, file_name: &str) {
     args.push("matroskamux".into());
     args.push("name=mux".into());
-    // Sans SIGINT sous Windows, le fichier doit rester lisible sans
-    // finalisation : matroska « streamable » n'exige pas d'index final.
-    #[cfg(windows)]
-    args.push("streamable=true".into());
     args.push("!".into());
     args.push("filesink".into());
     args.push(format!("location={file_name}"));
@@ -388,7 +386,7 @@ impl Recording {
             .kill_on_drop(true);
 
         #[cfg(windows)]
-        cmd.creation_flags(CREATE_NO_WINDOW);
+        cmd.creation_flags(CHILD_CREATION_FLAGS);
 
         #[cfg(unix)]
         {
@@ -478,8 +476,20 @@ impl Recording {
         }
         #[cfg(windows)]
         {
-            let _ = self.child.kill().await;
-            let _ = tokio::time::timeout(STOP_GRACE, self.child.wait()).await;
+            // Ctrl+Break → EOS → MKV finalisé (index de seek écrit) ;
+            // kill seulement si l'arrêt propre échoue ou traîne.
+            let graceful = self
+                .child
+                .id()
+                .is_some_and(crate::win::console::send_ctrl_break);
+            if !graceful
+                || tokio::time::timeout(STOP_GRACE, self.child.wait())
+                    .await
+                    .is_err()
+            {
+                let _ = self.child.kill().await;
+                let _ = tokio::time::timeout(STOP_GRACE, self.child.wait()).await;
+            }
         }
         self.file
     }

@@ -2,6 +2,7 @@
 //! fenêtre Discord, et job object pour ne jamais orphaner gst-launch.
 
 pub mod audio;
+pub mod console;
 pub mod job;
 pub mod window;
 

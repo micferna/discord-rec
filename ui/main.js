@@ -6,6 +6,11 @@ const { listen } = window.__TAURI__.event;
 
 const $ = (id) => document.getElementById(id);
 
+// Pas de menu contextuel du navigateur (sauf champs de saisie, pour coller).
+document.addEventListener("contextmenu", (e) => {
+  if (!e.target.closest("input, textarea")) e.preventDefault();
+});
+
 let startedAtMs = null;
 
 /* ── Rendu de l'état ─────────────────────────────────────────── */
