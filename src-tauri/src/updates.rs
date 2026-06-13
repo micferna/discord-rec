@@ -1,0 +1,66 @@
+//! Mises à jour automatiques depuis les releases GitHub.
+//!
+//! Le manifeste `latest.json` (généré et signé par la CI à chaque release)
+//! est interrogé via le plugin updater. Quand une mise à jour existe pour la
+//! plateforme courante (Windows : NSIS), elle est téléchargée, vérifiée par
+//! signature, installée, puis l'app redémarre. Sous Linux (.deb), le plugin
+//! ne gère pas l'installation : l'UI propose simplement d'ouvrir la page de
+//! la release.
+
+use serde::Serialize;
+use tauri::AppHandle;
+use tauri_plugin_updater::UpdaterExt;
+
+#[derive(Clone, Serialize)]
+pub struct UpdateInfo {
+    pub version: String,
+    pub notes: Option<String>,
+    /// `true` si le plugin peut installer tout seul (Windows) ; sinon l'UI
+    /// renvoie vers la page de release.
+    pub installable: bool,
+}
+
+#[tauri::command]
+pub async fn check_update(app: AppHandle) -> Result<Option<UpdateInfo>, String> {
+    let updater = app.updater().map_err(|e| e.to_string())?;
+    match updater.check().await {
+        Ok(Some(update)) => Ok(Some(UpdateInfo {
+            version: update.version.clone(),
+            notes: update.body.clone(),
+            installable: cfg!(windows),
+        })),
+        Ok(None) => Ok(None),
+        // Plateforme absente du manifeste (ex. installation .deb) : pas
+        // d'erreur bloquante, juste pas de mise à jour automatique.
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+#[tauri::command]
+pub async fn install_update(app: AppHandle) -> Result<(), String> {
+    let updater = app.updater().map_err(|e| e.to_string())?;
+    let update = updater
+        .check()
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "aucune mise à jour disponible".to_owned())?;
+    update
+        .download_and_install(|_chunk, _total| {}, || {})
+        .await
+        .map_err(|e| e.to_string())?;
+    app.restart();
+}
+
+/// Ouvre la page de la dernière release (chemin Linux/.deb).
+#[tauri::command]
+pub fn open_releases_page() -> Result<(), String> {
+    #[cfg(unix)]
+    let opener = "xdg-open";
+    #[cfg(windows)]
+    let opener = "explorer";
+    std::process::Command::new(opener)
+        .arg("https://github.com/micferna/discord-rec/releases/latest")
+        .spawn()
+        .map(drop)
+        .map_err(|e| e.to_string())
+}

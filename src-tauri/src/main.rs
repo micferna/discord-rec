@@ -1,12 +1,14 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod config;
+mod mics;
 #[cfg(unix)]
 mod portal;
 #[cfg(unix)]
 mod pw;
 mod recorder;
 mod service;
+mod updates;
 mod voice;
 #[cfg(windows)]
 mod win;
@@ -35,6 +37,7 @@ struct UiConfig {
     audio_bitrate_kbps: u32,
     framerate: u32,
     stop_debounce_s: u32,
+    mic_target: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -64,6 +67,7 @@ fn get_config(shared: SharedState) -> UiConfig {
         audio_bitrate_kbps: cfg.audio_bitrate_kbps,
         framerate: cfg.framerate,
         stop_debounce_s: cfg.stop_debounce_s,
+        mic_target: cfg.mic_target,
     }
 }
 
@@ -79,6 +83,7 @@ fn set_config(shared: SharedState, ui: UiConfig) -> Result<(), String> {
     cfg.audio_bitrate_kbps = ui.audio_bitrate_kbps;
     cfg.framerate = ui.framerate;
     cfg.stop_debounce_s = ui.stop_debounce_s;
+    cfg.mic_target = ui.mic_target;
     cfg.sanitize();
     config::save(&cfg).map_err(|e| format!("{e:#}"))
 }
@@ -90,6 +95,11 @@ fn reset_window_token(shared: SharedState) -> Result<(), String> {
     let mut cfg = shared.config.lock().expect("mutex config");
     cfg.restore_token = None;
     config::save(&cfg).map_err(|e| format!("{e:#}"))
+}
+
+#[tauri::command]
+async fn list_mics() -> Vec<mics::Mic> {
+    mics::list().await
 }
 
 #[tauri::command]
@@ -153,6 +163,7 @@ fn main() {
     let shared = Arc::new(Shared::new(config::load()));
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             // Relancer le binaire ramène la fenêtre existante.
             if let Some(window) = app.get_webview_window("main") {
@@ -177,10 +188,14 @@ fn main() {
             set_enabled,
             get_config,
             set_config,
+            list_mics,
             reset_window_token,
             list_recordings,
             open_recordings_dir,
-            quit_app
+            quit_app,
+            updates::check_update,
+            updates::install_update,
+            updates::open_releases_page
         ])
         .run(tauri::generate_context!())
         .expect("échec du démarrage de l'application");

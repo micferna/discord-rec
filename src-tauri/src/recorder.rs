@@ -99,12 +99,35 @@ pub struct Recording {
     _job: Option<crate::win::job::JobHandle>,
 }
 
-/// Élément source + propriétés pour capturer la sortie audio de Discord
-/// (`target` renseigné) ou le micro par défaut (`target` vide).
+/// Source de la sortie audio de Discord (les autres participants).
 #[cfg(unix)]
-fn audio_source_tokens(target: Option<u64>) -> Vec<String> {
+fn discord_audio_tokens(target: u64) -> Vec<String> {
+    vec![
+        "pipewiresrc".to_owned(),
+        format!("target-object={target}"),
+        "do-timestamp=true".to_owned(),
+    ]
+}
+
+#[cfg(windows)]
+fn discord_audio_tokens(pid: u64) -> Vec<String> {
+    vec![
+        "wasapi2src".to_owned(),
+        // Loopback ciblé sur l'arbre de processus Discord (Win10 20H2+).
+        "loopback=true".to_owned(),
+        "loopback-mode=include-process-tree".to_owned(),
+        format!("loopback-target-pid={pid}"),
+        "do-timestamp=true".to_owned(),
+    ]
+}
+
+/// Source micro : périphérique choisi dans les réglages, sinon celui par
+/// défaut du système. L'identifiant vient de `mics::list()` et est déjà au
+/// format attendu par l'élément source de la plateforme.
+#[cfg(unix)]
+fn mic_audio_tokens(mic: Option<&str>) -> Vec<String> {
     let mut tokens = vec!["pipewiresrc".to_owned()];
-    if let Some(serial) = target {
+    if let Some(serial) = mic {
         tokens.push(format!("target-object={serial}"));
     }
     tokens.push("do-timestamp=true".to_owned());
@@ -112,20 +135,18 @@ fn audio_source_tokens(target: Option<u64>) -> Vec<String> {
 }
 
 #[cfg(windows)]
-fn audio_source_tokens(target: Option<u64>) -> Vec<String> {
+fn mic_audio_tokens(mic: Option<&str>) -> Vec<String> {
     let mut tokens = vec!["wasapi2src".to_owned()];
-    if let Some(pid) = target {
-        // Loopback ciblé sur l'arbre de processus Discord (Win10 20H2+).
-        tokens.push("loopback=true".to_owned());
-        tokens.push("loopback-mode=include-process-tree".to_owned());
-        tokens.push(format!("loopback-target-pid={pid}"));
+    if let Some(device_token) = mic {
+        // Token `device="…"` complet, échappé par gst-device-monitor.
+        tokens.push(device_token.to_owned());
     }
     tokens.push("do-timestamp=true".to_owned());
     tokens
 }
 
-fn audio_branch(args: &mut Vec<String>, target: Option<u64>, bitrate_kbps: u32) {
-    args.extend(audio_source_tokens(target));
+fn audio_branch(args: &mut Vec<String>, source: Vec<String>, bitrate_kbps: u32) {
+    args.extend(source);
     for token in [
         "!",
         "queue",
@@ -184,7 +205,7 @@ const ENCODER_CANDIDATES: &[(&str, VideoEncoder)] = &[
 /// Sous Windows, l'installeur officiel ne met pas son dossier `bin` dans le
 /// PATH : on regarde la variable d'environnement qu'il pose, puis le chemin
 /// d'installation par défaut, avant de retomber sur le PATH.
-fn gst_tool(name: &str) -> std::path::PathBuf {
+pub(crate) fn gst_tool(name: &str) -> std::path::PathBuf {
     #[cfg(windows)]
     {
         let exe = format!("{name}.exe");
@@ -365,10 +386,17 @@ impl Recording {
             video_branch(&mut args, spec, encoder, cfg.video_bitrate_kbps);
         }
         if let Some(target) = audio_target {
-            audio_branch(&mut args, Some(target), cfg.audio_bitrate_kbps);
+            audio_branch(
+                &mut args,
+                discord_audio_tokens(target),
+                cfg.audio_bitrate_kbps,
+            );
         }
-        // Micro : source par défaut (pas de cible explicite).
-        audio_branch(&mut args, None, cfg.audio_bitrate_kbps);
+        audio_branch(
+            &mut args,
+            mic_audio_tokens(cfg.mic_target.as_deref()),
+            cfg.audio_bitrate_kbps,
+        );
         mux_tokens(&mut args, file_name);
 
         // gst-launch écrit ses messages d'erreur sur stdout : on journalise

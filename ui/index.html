@@ -9,6 +9,11 @@
 <body>
   <main class="console">
 
+    <div class="update-banner" id="update-banner" hidden>
+      <span id="update-text">Nouvelle version disponible</span>
+      <button type="button" class="btn btn-accent btn-small" id="update-btn">Mettre à jour</button>
+    </div>
+
     <header class="masthead">
       <div class="tally" id="tally" aria-hidden="true"><span class="tally-core"></span></div>
       <div class="masthead-text">
@@ -50,6 +55,12 @@
         <label class="field field-inline">
           <input type="checkbox" id="cfg-video" />
           <span>Capturer la fenêtre Discord (vidéo)</span>
+        </label>
+        <label class="field">
+          <span>Micro enregistré (piste 2)</span>
+          <select id="cfg-mic">
+            <option value="">Micro par défaut du système</option>
+          </select>
         </label>
         <div class="field-row">
           <label class="field">

@@ -39,6 +39,35 @@ body {
   min-height: 100vh;
 }
 
+/* ── Bandeau de mise à jour ───────────────────────────────────── */
+
+.update-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 12px;
+  background: rgb(255 180 84 / 0.08);
+  border: 1px solid rgb(255 180 84 / 0.35);
+  border-radius: 6px;
+  font-size: 11px;
+  color: var(--amber);
+}
+
+/* ── Sélecteur (micro) ────────────────────────────────────────── */
+
+.field select {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink);
+  background: var(--bg-inset);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 8px 9px;
+  outline: none;
+}
+.field select:focus { border-color: var(--red-deep); }
+
 /* ── En-tête : lampe tally + titre + interrupteur AUTO ────────── */
 
 .masthead {

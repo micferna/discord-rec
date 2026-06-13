@@ -14,6 +14,8 @@ pub struct Config {
     pub framerate: u32,
     /// Secondes sans vocal avant d'arrêter l'enregistrement (anti-flap reconnexion).
     pub stop_debounce_s: u32,
+    /// Micro à enregistrer (identifiant de `mics::list()`) ; `None` = défaut.
+    pub mic_target: Option<String>,
     /// Jeton du portail Wayland pour réutiliser la fenêtre choisie sans redemander.
     pub restore_token: Option<String>,
 }
@@ -30,6 +32,7 @@ impl Default for Config {
             audio_bitrate_kbps: 128,
             framerate: 30,
             stop_debounce_s: 3,
+            mic_target: None,
             restore_token: None,
         }
     }
@@ -42,6 +45,13 @@ impl Config {
         self.audio_bitrate_kbps = self.audio_bitrate_kbps.clamp(32, 510);
         self.framerate = self.framerate.clamp(5, 60);
         self.stop_debounce_s = self.stop_debounce_s.clamp(1, 120);
+        if self
+            .mic_target
+            .as_deref()
+            .is_some_and(|m| m.trim().is_empty())
+        {
+            self.mic_target = None;
+        }
     }
 }
 
