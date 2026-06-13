@@ -83,12 +83,13 @@ Le même binaire fonctionne sous Windows avec des mécanismes natifs :
   (`d3d11screencapturesrc`) ;
 - **Encodeur** : NVENC > Quick Sync > AMF > Media Foundation > x264.
 
-Prérequis : installer le **runtime GStreamer MSVC ≥ 1.22**
-([gstreamer.freedesktop.org](https://gstreamer.freedesktop.org/download/),
-paquet *runtime*, choisir l'installation « **Complete** »). Pas besoin de
-toucher au `PATH` : l'app localise GStreamer toute seule (variable
-d'environnement de l'installeur ou `C:\gstreamer\`). Installeurs `.msi` et
-`.exe` attachés à chaque release.
+Installation : prendre le **`setup.exe`** attaché à la release — il
+télécharge et installe automatiquement le runtime GStreamer s'il est absent
+(~130 Mo, une seule fois). Le `.msi` est l'alternative sans cette étape
+automatique : il faut alors installer soi-même le
+[runtime GStreamer MSVC](https://gstreamer.freedesktop.org/download/)
+(mode « Complete »). Dans les deux cas, pas besoin de toucher au `PATH` :
+l'app localise GStreamer toute seule.
 
 > ⚠️ Le support Windows est compilé et vérifié en CI mais encore peu testé
 > en conditions réelles — les retours sont bienvenus dans les issues.
