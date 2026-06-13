@@ -1,6 +1,6 @@
 [package]
 name = "discord-rec"
-version = "0.3.1"
+version = "0.3.2"
 edition = "2021"
 rust-version = "1.87"
 description = "Enregistre automatiquement (audio + vidéo) les sessions vocales Discord via PipeWire et X11/XWayland"
@@ -12,7 +12,7 @@ authors = ["micferna"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
 tauri-plugin-single-instance = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

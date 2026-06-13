@@ -189,9 +189,13 @@ async function checkUpdate() {
   try {
     update = await invoke("check_update");
   } catch {
+    $("update-banner").hidden = true;
     return; // plateforme sans manifeste (.deb) ou hors-ligne : silencieux
   }
-  if (!update) return;
+  if (!update) {
+    $("update-banner").hidden = true; // déjà à jour : pas de bannière
+    return;
+  }
   $("update-text").textContent =
     `Version ${update.version} disponible (installée : ${update.current})`;
   const btn = $("update-btn");

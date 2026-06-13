@@ -45,9 +45,11 @@ cargo build --release
 ./target/release/discord-rec
 ```
 
-Fermer la fenêtre **ne quitte pas** le service (relancer le binaire fait
-réapparaître la fenêtre — instance unique). Le bouton **Quitter** arrête
-proprement l'enregistrement en cours puis ferme l'application.
+Fermer la fenêtre **ne quitte pas** le service : il continue d'enregistrer en
+arrière-plan. Une **icône de barre d'état** permet de rouvrir la fenêtre
+(clic) ou de **Quitter** proprement (l'enregistrement en cours est finalisé
+avant la fermeture). Relancer le binaire ramène aussi la fenêtre existante
+(instance unique).
 
 ### Lancement automatique à l'ouverture de session
 

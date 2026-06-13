@@ -164,21 +164,67 @@ fn quit_app(shared: SharedState) {
     shared.quit.store(true, Ordering::Relaxed);
 }
 
+fn show_main_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+}
+
+/// Icône de barre d'état : un point d'entrée visible (l'app reste cachée
+/// pendant l'enregistrement) et un vrai « Quitter ». Évite les instances
+/// fantômes invisibles.
+fn build_tray(app: &tauri::AppHandle, shared: Arc<Shared>) -> tauri::Result<()> {
+    use tauri::menu::{Menu, MenuItem};
+    use tauri::tray::{MouseButton, TrayIconBuilder, TrayIconEvent};
+
+    let show = MenuItem::with_id(app, "show", "Afficher", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "Quitter", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&show, &quit])?;
+
+    let tray_shared = shared.clone();
+    TrayIconBuilder::with_id("main")
+        .icon(app.default_window_icon().expect("icône fenêtre").clone())
+        .tooltip("Discord REC")
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .on_menu_event(move |app, event| match event.id.as_ref() {
+            "show" => show_main_window(app),
+            "quit" => tray_shared.quit.store(true, Ordering::Relaxed),
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                ..
+            } = event
+            {
+                show_main_window(tray.app_handle());
+            }
+        })
+        .build(app)?;
+    Ok(())
+}
+
 fn main() {
     let shared = Arc::new(Shared::new(config::load()));
+    let setup_shared = shared.clone();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             // Relancer le binaire ramène la fenêtre existante.
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.show();
-                let _ = window.set_focus();
-            }
+            show_main_window(app);
         }))
         .manage(shared.clone())
         .setup(move |app| {
-            tauri::async_runtime::spawn(service::run(app.handle().clone(), shared));
+            // Tray non bloquant : sur un Linux sans appindicator, l'app
+            // fonctionne quand même (juste sans icône de barre d'état).
+            if let Err(e) = build_tray(app.handle(), setup_shared.clone()) {
+                eprintln!("[discord-rec] icône de barre d'état indisponible : {e}");
+            }
+            tauri::async_runtime::spawn(service::run(app.handle().clone(), setup_shared));
             Ok(())
         })
         .on_window_event(|window, event| {
