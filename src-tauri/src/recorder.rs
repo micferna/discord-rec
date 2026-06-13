@@ -188,8 +188,10 @@ fn gst_tool(name: &str) -> std::path::PathBuf {
         let exe = format!("{name}.exe");
         let roots = [
             std::env::var_os("GSTREAMER_1_0_ROOT_MSVC_X86_64"),
+            std::env::var_os("GSTREAMER_1_0_ROOT_MINGW_X86_64"),
             std::env::var_os("GSTREAMER_1_0_ROOT_X86_64"),
             Some(std::ffi::OsString::from(r"C:\gstreamer\1.0\msvc_x86_64")),
+            Some(std::ffi::OsString::from(r"C:\gstreamer\1.0\mingw_x86_64")),
         ];
         for root in roots.into_iter().flatten() {
             let candidate = std::path::Path::new(&root).join("bin").join(&exe);
