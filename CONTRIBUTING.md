@@ -4,10 +4,10 @@
 
 ```sh
 sudo apt install -y libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev \
-  librsvg2-dev libjavascriptcoregtk-4.1-dev \
+  librsvg2-dev libjavascriptcoregtk-4.1-dev libayatana-appindicator3-dev \
   gstreamer1.0-tools gstreamer1.0-pipewire gstreamer1.0-plugins-good \
   gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly \
-  pipewire-bin x11-utils
+  gstreamer1.0-plugins-base-apps pipewire-bin x11-utils
 ```
 
 Rust stable ≥ 1.87 (via [rustup](https://rustup.rs)).
