@@ -92,6 +92,8 @@ async function loadConfig() {
     select.appendChild(opt);
   }
   select.value = cfg.mic_target ?? "";
+
+  $("cfg-audiomode").value = cfg.mix_audio ? "mixed" : "separate";
 }
 
 function flash(msg, ok) {
@@ -115,6 +117,7 @@ $("settings").addEventListener("submit", async (e) => {
         framerate: Number($("cfg-fps").value),
         stop_debounce_s: Number($("cfg-debounce").value),
         mic_target: $("cfg-mic").value || null,
+        mix_audio: $("cfg-audiomode").value === "mixed",
       },
     });
     flash("réglages enregistrés ✓", true);

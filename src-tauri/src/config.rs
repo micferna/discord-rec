@@ -16,6 +16,9 @@ pub struct Config {
     pub stop_debounce_s: u32,
     /// Micro à enregistrer (identifiant de `mics::list()`) ; `None` = défaut.
     pub mic_target: Option<String>,
+    /// `true` = micro et Discord mixés dans UNE piste (audible partout) ;
+    /// `false` = deux pistes séparées (pratique au montage).
+    pub mix_audio: bool,
     /// Jeton du portail Wayland pour réutiliser la fenêtre choisie sans redemander.
     pub restore_token: Option<String>,
 }
@@ -33,6 +36,7 @@ impl Default for Config {
             framerate: 30,
             stop_debounce_s: 3,
             mic_target: None,
+            mix_audio: true,
             restore_token: None,
         }
     }

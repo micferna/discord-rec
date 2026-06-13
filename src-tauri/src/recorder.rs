@@ -145,7 +145,10 @@ fn mic_audio_tokens(mic: Option<&str>) -> Vec<String> {
     tokens
 }
 
-fn audio_branch(args: &mut Vec<String>, source: Vec<String>, bitrate_kbps: u32) {
+/// Branche audio « pistes séparées » : une source → son propre encodeur Opus
+/// → une piste du conteneur. Pratique au montage, mais beaucoup de lecteurs
+/// ne lisent que la première piste.
+fn audio_branch_separate(args: &mut Vec<String>, source: Vec<String>, bitrate_kbps: u32) {
     args.extend(source);
     for token in [
         "!",
@@ -162,6 +165,42 @@ fn audio_branch(args: &mut Vec<String>, source: Vec<String>, bitrate_kbps: u32) 
     args.push(format!("bitrate={}", u64::from(bitrate_kbps) * 1000));
     for token in ["!", "queue", "!", "mux."] {
         args.push(token.into());
+    }
+}
+
+/// Branche audio « piste unique mixée » : toutes les sources entrent dans un
+/// `audiomixer` → un seul Opus → une piste. Audible dans tous les lecteurs.
+fn audio_branch_mixed(args: &mut Vec<String>, sources: &[Vec<String>], bitrate_kbps: u32) {
+    // Le mixeur d'abord (nommé), suivi de l'encodeur et du mux.
+    for token in [
+        "audiomixer",
+        "name=amix",
+        "!",
+        "audioconvert",
+        "!",
+        "opusenc",
+    ] {
+        args.push(token.into());
+    }
+    args.push(format!("bitrate={}", u64::from(bitrate_kbps) * 1000));
+    for token in ["!", "queue", "!", "mux."] {
+        args.push(token.into());
+    }
+    // Puis chaque source rejoint le mixeur.
+    for source in sources {
+        args.extend(source.iter().cloned());
+        for token in [
+            "!",
+            "queue",
+            "!",
+            "audioconvert",
+            "!",
+            "audioresample",
+            "!",
+            "amix.",
+        ] {
+            args.push(token.into());
+        }
     }
 }
 
@@ -385,18 +424,20 @@ impl Recording {
         if let Some(spec) = &video {
             video_branch(&mut args, spec, encoder, cfg.video_bitrate_kbps);
         }
+        // Sources audio : sortie Discord (si trouvée) + micro.
+        let mut sources: Vec<Vec<String>> = Vec::new();
         if let Some(target) = audio_target {
-            audio_branch(
-                &mut args,
-                discord_audio_tokens(target),
-                cfg.audio_bitrate_kbps,
-            );
+            sources.push(discord_audio_tokens(target));
         }
-        audio_branch(
-            &mut args,
-            mic_audio_tokens(cfg.mic_target.as_deref()),
-            cfg.audio_bitrate_kbps,
-        );
+        sources.push(mic_audio_tokens(cfg.mic_target.as_deref()));
+
+        if cfg.mix_audio {
+            audio_branch_mixed(&mut args, &sources, cfg.audio_bitrate_kbps);
+        } else {
+            for source in sources {
+                audio_branch_separate(&mut args, source, cfg.audio_bitrate_kbps);
+            }
+        }
         mux_tokens(&mut args, file_name);
 
         // gst-launch écrit ses messages d'erreur sur stdout : on journalise

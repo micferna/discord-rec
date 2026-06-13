@@ -38,6 +38,7 @@ struct UiConfig {
     framerate: u32,
     stop_debounce_s: u32,
     mic_target: Option<String>,
+    mix_audio: bool,
 }
 
 #[derive(Serialize)]
@@ -68,6 +69,7 @@ fn get_config(shared: SharedState) -> UiConfig {
         framerate: cfg.framerate,
         stop_debounce_s: cfg.stop_debounce_s,
         mic_target: cfg.mic_target,
+        mix_audio: cfg.mix_audio,
     }
 }
 
@@ -84,6 +86,7 @@ fn set_config(shared: SharedState, ui: UiConfig) -> Result<(), String> {
     cfg.framerate = ui.framerate;
     cfg.stop_debounce_s = ui.stop_debounce_s;
     cfg.mic_target = ui.mic_target;
+    cfg.mix_audio = ui.mix_audio;
     cfg.sanitize();
     config::save(&cfg).map_err(|e| format!("{e:#}"))
 }
@@ -142,19 +145,34 @@ fn list_recordings(shared: SharedState) -> Vec<RecFile> {
     files
 }
 
-#[tauri::command]
-fn open_recordings_dir(shared: SharedState) -> Result<(), String> {
-    let dir = shared.config_snapshot().output_dir;
-    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+/// Ouvre un chemin/URL avec le gestionnaire du système.
+///
+/// L'app est compilée sans console (`windows_subsystem = "windows"`) : ses
+/// descripteurs standard sont invalides. Sans rediriger ceux de l'enfant
+/// vers `null`, `explorer`/`xdg-open` héritent de descripteurs invalides et
+/// échouent avec « os error 6 » (`ERROR_INVALID_HANDLE`). On force donc des
+/// flux nuls valides.
+fn open_with_system(arg: &std::ffi::OsStr) -> Result<(), String> {
+    use std::process::Stdio;
     #[cfg(unix)]
     let opener = "xdg-open";
     #[cfg(windows)]
     let opener = "explorer";
     std::process::Command::new(opener)
-        .arg(&dir)
+        .arg(arg)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .spawn()
         .map(drop)
         .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn open_recordings_dir(shared: SharedState) -> Result<(), String> {
+    let dir = shared.config_snapshot().output_dir;
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    open_with_system(dir.as_os_str())
 }
 
 /// Demande l'arrêt : la boucle de service finalise l'enregistrement en cours
