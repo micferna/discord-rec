@@ -98,6 +98,11 @@ fn reset_window_token(shared: SharedState) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn get_app_version(app: tauri::AppHandle) -> String {
+    app.package_info().version.to_string()
+}
+
+#[tauri::command]
 async fn list_mics() -> Vec<mics::Mic> {
     mics::list().await
 }
@@ -188,6 +193,7 @@ fn main() {
             set_enabled,
             get_config,
             set_config,
+            get_app_version,
             list_mics,
             reset_window_token,
             list_recordings,

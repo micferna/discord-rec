@@ -14,6 +14,7 @@ use tauri_plugin_updater::UpdaterExt;
 #[derive(Clone, Serialize)]
 pub struct UpdateInfo {
     pub version: String,
+    pub current: String,
     pub notes: Option<String>,
     /// `true` si le plugin peut installer tout seul (Windows) ; sinon l'UI
     /// renvoie vers la page de release.
@@ -26,6 +27,7 @@ pub async fn check_update(app: AppHandle) -> Result<Option<UpdateInfo>, String> 
     match updater.check().await {
         Ok(Some(update)) => Ok(Some(UpdateInfo {
             version: update.version.clone(),
+            current: update.current_version.clone(),
             notes: update.body.clone(),
             installable: cfg!(windows),
         })),

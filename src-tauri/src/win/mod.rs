@@ -11,10 +11,19 @@ use windows::Win32::System::Threading::{
     OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
 };
 
-/// Le processus `pid` est-il un `Discord*.exe` (Discord, `DiscordPTB`,
-/// `DiscordCanary`) ?
+/// Exécutables Discord officiels (sans extension). Liste exacte : un simple
+/// préfixe matcherait notre propre `Discord REC.exe` — l'app s'enregistrait
+/// elle-même.
+const DISCORD_EXES: &[&str] = &[
+    "discord",
+    "discordptb",
+    "discordcanary",
+    "discorddevelopment",
+];
+
+/// Le processus `pid` est-il un vrai client Discord ?
 pub(crate) fn is_discord_pid(pid: u32) -> bool {
-    if pid == 0 {
+    if pid == 0 || pid == std::process::id() {
         return false;
     }
     // SAFETY: appels Win32 documentés ; le handle est toujours refermé.
@@ -39,6 +48,10 @@ pub(crate) fn is_discord_pid(pid: u32) -> bool {
         std::path::Path::new(&path)
             .file_stem()
             .and_then(|s| s.to_str())
-            .is_some_and(|stem| stem.to_ascii_lowercase().starts_with("discord"))
+            .is_some_and(|stem| {
+                DISCORD_EXES
+                    .iter()
+                    .any(|exe| stem.eq_ignore_ascii_case(exe))
+            })
     }
 }

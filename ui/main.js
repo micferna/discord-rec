@@ -171,7 +171,15 @@ $("enabled").addEventListener("change", (e) => {
   invoke("set_enabled", { enabled: e.target.checked });
 });
 
-$("open-dir").addEventListener("click", () => invoke("open_recordings_dir"));
+$("open-dir").addEventListener("click", async () => {
+  try {
+    await invoke("open_recordings_dir");
+  } catch (err) {
+    const el = $("last-error");
+    el.hidden = false;
+    el.textContent = `ouverture du dossier : ${err}`;
+  }
+});
 $("quit").addEventListener("click", () => invoke("quit_app"));
 
 /* ── Mises à jour ────────────────────────────────────────────── */
@@ -184,7 +192,8 @@ async function checkUpdate() {
     return; // plateforme sans manifeste (.deb) ou hors-ligne : silencieux
   }
   if (!update) return;
-  $("update-text").textContent = `Version ${update.version} disponible`;
+  $("update-text").textContent =
+    `Version ${update.version} disponible (installée : ${update.current})`;
   const btn = $("update-btn");
   btn.textContent = update.installable ? "Mettre à jour" : "Voir la release";
   btn.onclick = async () => {
@@ -211,6 +220,7 @@ listen("status", (event) => render(event.payload));
 listen("recording-saved", () => refreshRecordings());
 
 (async () => {
+  $("app-version").textContent = `v${await invoke("get_app_version")}`;
   await loadConfig();
   await refreshRecordings();
   render(await invoke("get_status"));
