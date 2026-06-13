@@ -74,7 +74,7 @@ pub async fn list() -> Vec<Mic> {
 
 /// Extrait de la sortie de `gst-device-monitor-1.0 Audio/Source` les blocs
 /// « Device found » : le libellé (`name :`) et le token `device="…"` de la
-/// ligne `gst-launch-1.0 wasapi2src …` suggérée (déjà échappé par GStreamer).
+/// ligne `gst-launch-1.0 wasapi2src …` suggérée (déjà échappé par `GStreamer`).
 #[cfg(windows)]
 fn parse_device_monitor(text: &str) -> Vec<Mic> {
     let mut mics = Vec::new();
