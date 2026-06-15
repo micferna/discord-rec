@@ -34,6 +34,12 @@
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
+
+/* L'attribut HTML `hidden` doit TOUJOURS masquer : sinon un `display:flex`
+   sur .update-banner l'emporte sur la règle navigateur
+   `[hidden]{display:none}` et le bandeau reste visible en permanence. */
+[hidden] { display: none !important; }
+
 html, body { height: 100%; }
 
 body {
