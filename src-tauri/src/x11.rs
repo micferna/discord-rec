@@ -7,6 +7,8 @@
 
 use anyhow::{Context, Result};
 
+use crate::appimage::CommandAppImageExt;
+
 /// Surface minimale (px²) pour écarter les fenêtres techniques d'Electron.
 const MIN_AREA: u64 = 200_000;
 
@@ -22,6 +24,7 @@ pub struct DiscordWindow {
 
 pub async fn find_discord_window() -> Result<Option<DiscordWindow>> {
     let out = tokio::process::Command::new("xwininfo")
+        .strip_appimage_env()
         .args(["-root", "-tree", "-int"])
         .stdin(std::process::Stdio::null())
         .output()

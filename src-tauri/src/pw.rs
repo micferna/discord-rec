@@ -10,10 +10,12 @@
 use anyhow::{ensure, Context, Result};
 use serde_json::Value;
 
+use crate::appimage::CommandAppImageExt;
 use crate::voice::Snapshot;
 
 pub async fn snapshot() -> Result<Snapshot> {
     let out = tokio::process::Command::new("pw-dump")
+        .strip_appimage_env()
         .stdin(std::process::Stdio::null())
         .output()
         .await

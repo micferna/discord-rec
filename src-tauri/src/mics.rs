@@ -8,6 +8,9 @@
 
 use serde::Serialize;
 
+#[cfg(unix)]
+use crate::appimage::CommandAppImageExt;
+
 #[derive(Clone, Serialize)]
 pub struct Mic {
     pub id: String,
@@ -17,6 +20,7 @@ pub struct Mic {
 #[cfg(unix)]
 pub async fn list() -> Vec<Mic> {
     let Ok(out) = tokio::process::Command::new("pw-dump")
+        .strip_appimage_env()
         .stdin(std::process::Stdio::null())
         .output()
         .await

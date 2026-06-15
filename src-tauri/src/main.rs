@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod appimage;
 mod config;
 mod instance;
 mod mics;
@@ -154,12 +155,14 @@ fn list_recordings(shared: SharedState) -> Vec<RecFile> {
 /// échouent avec « os error 6 » (`ERROR_INVALID_HANDLE`). On force donc des
 /// flux nuls valides.
 fn open_with_system(arg: &std::ffi::OsStr) -> Result<(), String> {
+    use crate::appimage::CommandAppImageExt;
     use std::process::Stdio;
     #[cfg(unix)]
     let opener = "xdg-open";
     #[cfg(windows)]
     let opener = "explorer";
     std::process::Command::new(opener)
+        .strip_appimage_env()
         .arg(arg)
         .stdin(Stdio::null())
         .stdout(Stdio::null())

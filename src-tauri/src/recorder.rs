@@ -17,6 +17,7 @@ use std::time::{Duration, SystemTime};
 use anyhow::{ensure, Context, Result};
 use tokio::process::{Child, Command};
 
+use crate::appimage::CommandAppImageExt;
 use crate::config::Config;
 
 const STOP_GRACE: Duration = Duration::from_secs(10);
@@ -272,6 +273,7 @@ pub(crate) fn gst_tool(name: &str) -> std::path::PathBuf {
 pub async fn detect_encoder() -> VideoEncoder {
     for &(element, encoder) in ENCODER_CANDIDATES {
         let found = Command::new(gst_tool("gst-inspect-1.0"))
+            .strip_appimage_env()
             .args(["--exists", element])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -447,7 +449,8 @@ impl Recording {
         let log_err = log.try_clone().context("clonage du journal gstreamer")?;
 
         let mut cmd = Command::new(gst_tool("gst-launch-1.0"));
-        cmd.args(&args)
+        cmd.strip_appimage_env()
+            .args(&args)
             .current_dir(&cfg.output_dir)
             .stdin(Stdio::null())
             .stdout(Stdio::from(log))

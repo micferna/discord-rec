@@ -57,6 +57,7 @@ pub async fn install_update(app: AppHandle) -> Result<(), String> {
 /// Ouvre la page de la dernière release (chemin Linux/.deb).
 #[tauri::command]
 pub fn open_releases_page() -> Result<(), String> {
+    use crate::appimage::CommandAppImageExt;
     use std::process::Stdio;
     #[cfg(unix)]
     let opener = "xdg-open";
@@ -65,6 +66,7 @@ pub fn open_releases_page() -> Result<(), String> {
     // Flux nuls : l'app GUI n'a pas de descripteurs standard valides à
     // hériter (sinon « os error 6 »).
     std::process::Command::new(opener)
+        .strip_appimage_env()
         .arg("https://github.com/micferna/discord-rec/releases/latest")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
