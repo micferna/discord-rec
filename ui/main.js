@@ -226,6 +226,14 @@ async function checkUpdate() {
 listen("status", (event) => render(event.payload));
 listen("recording-saved", () => refreshRecordings());
 
+// La liste reflète aussi les fichiers supprimés/ajoutés HORS de l'app (ex.
+// effacés dans l'explorateur) : on relit le dossier au retour du focus, au
+// retour de visibilité, et par sondage léger tant que la fenêtre est visible.
+window.addEventListener("focus", refreshRecordings);
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) refreshRecordings();
+});
+
 (async () => {
   $("app-version").textContent = `v${await invoke("get_app_version")}`;
   await loadConfig();
@@ -233,4 +241,7 @@ listen("recording-saved", () => refreshRecordings());
   render(await invoke("get_status"));
   setTimeout(checkUpdate, 5000);
   setInterval(checkUpdate, 6 * 3600 * 1000); // re-vérifie toutes les 6 h
+  setInterval(() => {
+    if (!document.hidden) refreshRecordings();
+  }, 5000);
 })();
