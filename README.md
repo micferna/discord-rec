@@ -37,6 +37,19 @@ démarre ; quand tu quittes, il s'arrête et le fichier est finalisé.
 - Tauri : `libwebkit2gtk-4.1-dev`, `libgtk-3-dev` (compilation)
 - `xdg-desktop-portal-gnome` (capture de fenêtre sous Wayland)
 
+## Installation & mises à jour (Linux)
+
+Deux artefacts sont publiés à chaque release :
+
+- **`.deb`** — installation système classique
+  (`sudo apt install ./Discord\ REC_*_amd64.deb`). La mise à jour ne s'installe
+  pas toute seule : l'app ouvre la page de release pour télécharger le nouveau
+  `.deb`.
+- **`.AppImage`** — binaire portable **avec mise à jour automatique en place**
+  (bouton « Mettre à jour » dans l'app, sans mot de passe). Nécessite
+  **GStreamer installé sur le système** (l'AppImage ne le bundle pas : l'app
+  appelle `gst-launch-1.0`) — cf. *Dépendances système* ci-dessus.
+
 ## Compiler & lancer
 
 ```sh

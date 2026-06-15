@@ -8,16 +8,26 @@
 </head>
 <body>
   <main class="console">
+    <!-- Vis machinées aux quatre coins de la façade -->
+    <span class="screw screw-tl" aria-hidden="true"></span>
+    <span class="screw screw-tr" aria-hidden="true"></span>
+    <span class="screw screw-bl" aria-hidden="true"></span>
+    <span class="screw screw-br" aria-hidden="true"></span>
 
     <div class="update-banner" id="update-banner" hidden>
+      <span class="update-glyph" aria-hidden="true"></span>
       <span id="update-text">Nouvelle version disponible</span>
       <button type="button" class="btn btn-accent btn-small" id="update-btn">Mettre à jour</button>
     </div>
 
     <header class="masthead">
-      <div class="tally" id="tally" aria-hidden="true"><span class="tally-core"></span></div>
+      <div class="tally" id="tally" aria-hidden="true">
+        <span class="tally-bezel"><span class="tally-core"></span></span>
+        <span class="tally-tag">ON&nbsp;AIR</span>
+      </div>
       <div class="masthead-text">
         <h1>DISCORD&nbsp;REC</h1>
+        <p class="model-line">MODEL&nbsp;DR&#8209;1 · VOICE&nbsp;CAPTURE</p>
         <p id="headline" class="headline">en attente du vocal…</p>
       </div>
       <label class="power" title="Enregistrement automatique">
@@ -40,8 +50,14 @@
     </section>
 
     <section class="deck">
-      <div class="timecode" id="timecode">00:00:00</div>
-      <div class="deck-file" id="current-file">aucun enregistrement en cours</div>
+      <div class="deck-window">
+        <div class="timecode" id="timecode">00:00:00</div>
+        <div class="vu" aria-hidden="true">
+          <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+          <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+        </div>
+        <div class="deck-file" id="current-file">aucun enregistrement en cours</div>
+      </div>
       <div class="deck-error" id="last-error" hidden></div>
     </section>
 

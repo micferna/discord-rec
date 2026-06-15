@@ -14,6 +14,38 @@
 !define GST_URL_UPSTREAM "https://gstreamer.freedesktop.org/data/pkg/windows/${GST_VERSION}/msvc/${GST_MSI_NAME}"
 !define GST_MSI_SHA256 "f1897f0f5a132d011d5ddfe76d8740fdd47bb0dc6c7f276a5880ade38976bc9c"
 
+; Hook pré-installation : anti-zombie + anti-doublon.
+;
+; ${UNINSTKEY} est défini par le template Tauri =
+;   Software\Microsoft\Windows\CurrentVersion\Uninstall\Discord REC
+!macro NSIS_HOOK_PREINSTALL
+  ; 1) Couper toute instance en cours. Sans ça : fichiers verrouillés pendant
+  ;    l'install, ET surtout un « zombie » d'ancienne version que le
+  ;    single-instance refocaliserait après la mise à jour (= la bannière de
+  ;    mise à jour qui réapparaît sans fin).
+  nsExec::Exec 'taskkill /F /T /IM "Discord REC.exe"'
+  Pop $0
+
+  ; 2) Anti-doublon perMachine -> perUser. L'app s'installe désormais pour
+  ;    l'utilisateur courant (HKCU). Une ancienne version (<= 0.3.1) installée
+  ;    « pour tous les utilisateurs » a écrit son entrée NSIS sous HKLM ; la
+  ;    logique « désinstaller l'ancienne » de Tauri ne regarde que HKCU (mode
+  ;    courant) + les installs MSI, donc cette ancienne NSIS perMachine
+  ;    survit et les deux cohabitent. On la désinstalle ici.
+  ;
+  ;    Best-effort : la désinstallation « pour tous les utilisateurs » peut
+  ;    déclencher une élévation (UAC). L'install perUser visant
+  ;    %LOCALAPPDATA% (chemin distinct), il n'y a pas de conflit même si la
+  ;    désinstallation s'exécute en arrière-plan.
+  ReadRegStr $0 HKLM "${UNINSTKEY}" "UninstallString"
+  StrCmp $0 "" preinstall_done 0
+    DetailPrint "Ancienne installation pour tous les utilisateurs detectee : desinstallation…"
+    ; $0 = `"C:\Program Files\Discord REC\uninstall.exe"` (deja entre
+    ; guillemets) : `'$0 /S'` forme une commande valide.
+    ExecWait '$0 /S' $1
+  preinstall_done:
+!macroend
+
 !macro NSIS_HOOK_POSTINSTALL
   ; Déjà installé ? (chemins par défaut des installeurs officiels)
   IfFileExists "C:\gstreamer\1.0\msvc_x86_64\bin\gst-launch-1.0.exe" gstreamer_done 0

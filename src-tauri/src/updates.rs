@@ -16,8 +16,9 @@ pub struct UpdateInfo {
     pub version: String,
     pub current: String,
     pub notes: Option<String>,
-    /// `true` si le plugin peut installer tout seul (Windows) ; sinon l'UI
-    /// renvoie vers la page de release.
+    /// `true` si le plugin peut installer tout seul (Windows, ou Linux quand
+    /// l'app tourne en `AppImage` : remplacement en place) ; sinon l'UI renvoie
+    /// vers la page de release (cas du `.deb`).
     pub installable: bool,
 }
 
@@ -29,7 +30,7 @@ pub async fn check_update(app: AppHandle) -> Result<Option<UpdateInfo>, String> 
             version: update.version.clone(),
             current: update.current_version.clone(),
             notes: update.body.clone(),
-            installable: cfg!(windows),
+            installable: self_installable(),
         })),
         Ok(None) => Ok(None),
         // Plateforme absente du manifeste (ex. installation .deb) : pas
@@ -71,4 +72,56 @@ pub fn open_releases_page() -> Result<(), String> {
         .spawn()
         .map(drop)
         .map_err(|e| e.to_string())
+}
+
+/// L'app peut-elle se mettre à jour toute seule sur cette plateforme/binaire ?
+///
+/// Windows : oui (NSIS). Linux : seulement en `AppImage` (le plugin remplace
+/// le fichier en place) — Tauri expose la variable `APPIMAGE` dans ce cas. Pour
+/// un `.deb`, l'UI renvoie vers la page de release.
+fn self_installable() -> bool {
+    self_installable_with(running_as_appimage())
+}
+
+#[cfg(target_os = "linux")]
+fn running_as_appimage() -> bool {
+    std::env::var_os("APPIMAGE").is_some()
+}
+
+#[cfg(not(target_os = "linux"))]
+fn running_as_appimage() -> bool {
+    false
+}
+
+#[cfg(windows)]
+fn self_installable_with(_appimage: bool) -> bool {
+    true
+}
+
+#[cfg(target_os = "linux")]
+fn self_installable_with(appimage: bool) -> bool {
+    appimage
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
+fn self_installable_with(_appimage: bool) -> bool {
+    false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::self_installable_with;
+
+    #[test]
+    fn installable_seulement_windows_ou_appimage_linux() {
+        if cfg!(windows) {
+            assert!(self_installable_with(true));
+            assert!(self_installable_with(false));
+        } else if cfg!(target_os = "linux") {
+            assert!(self_installable_with(true)); // AppImage → auto-install
+            assert!(!self_installable_with(false)); // .deb → page de release
+        } else {
+            assert!(!self_installable_with(true));
+        }
+    }
 }

@@ -17,10 +17,11 @@ jobs:
       matrix:
         include:
           - os: ubuntu-24.04
-            name: Linux .deb
-            bundles: deb
+            name: Linux .deb + AppImage
+            bundles: deb,appimage
             artifacts: |
               src-tauri/target/release/bundle/deb/*.deb
+              src-tauri/target/release/bundle/appimage/*.AppImage
           - os: windows-latest
             name: Windows MSI + NSIS
             bundles: msi,nsis

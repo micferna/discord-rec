@@ -199,13 +199,20 @@ async function checkUpdate() {
     $("update-banner").hidden = true; // déjà à jour : pas de bannière
     return;
   }
-  $("update-text").textContent =
-    `Version ${update.version} disponible (installée : ${update.current})`;
+  $("update-text").textContent = update.installable
+    ? `Version ${update.version} disponible (installée : ${update.current})`
+    : `Version ${update.version} disponible (installée : ${update.current}) — mise à jour via le paquet`;
   const btn = $("update-btn");
-  btn.textContent = update.installable ? "Mettre à jour" : "Voir la release";
+  btn.textContent = update.installable ? "Mettre à jour" : "Télécharger";
   btn.onclick = async () => {
     if (!update.installable) {
-      invoke("open_releases_page");
+      // Linux/.deb : l'updater ne réinstalle pas un paquet, on ouvre la
+      // page de release pour télécharger le nouveau .deb.
+      try {
+        await invoke("open_releases_page");
+      } catch (err) {
+        $("update-text").textContent = `Impossible d'ouvrir la page de release : ${err}`;
+      }
       return;
     }
     btn.disabled = true;

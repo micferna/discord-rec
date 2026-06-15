@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod config;
+mod instance;
 mod mics;
 #[cfg(unix)]
 mod portal;
@@ -226,6 +227,12 @@ fn build_tray(app: &tauri::AppHandle, shared: Arc<Shared>) -> tauri::Result<()> 
 }
 
 fn main() {
+    // Avant tout : couper les instances obsolètes encore en mémoire (ancienne
+    // version dont le binaire a été remplacé par une mise à jour). Sinon
+    // single-instance refocaliserait cette vieille fenêtre, qui réafficherait
+    // sans fin la bannière de mise à jour.
+    instance::terminate_stale_instances();
+
     let shared = Arc::new(Shared::new(config::load()));
     let setup_shared = shared.clone();
 

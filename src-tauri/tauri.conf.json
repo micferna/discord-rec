@@ -27,6 +27,7 @@
     "active": true,
     "targets": [
       "deb",
+      "appimage",
       "msi",
       "nsis"
     ],
