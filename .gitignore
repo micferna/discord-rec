@@ -3,6 +3,9 @@
 *.mkv
 .gstreamer.log
 
+# Config locale de Claude Code (n'a rien à faire dans le dépôt public)
+/.claude/
+
 # Filet de sécurité : ne jamais committer de clé de signature / secret.
 # (la clé privée de l'updater vit dans les secrets GitHub Actions, pas ici)
 *.key
