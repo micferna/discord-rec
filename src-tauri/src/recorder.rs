@@ -387,10 +387,22 @@ fn video_branch(
     // Résolution épinglée : si la fenêtre est redimensionnée en cours
     // d'enregistrement, videoscale absorbe le changement de caps au lieu de
     // le propager à l'encodeur (qui échouerait).
+    //
+    // `pixel-aspect-ratio=1/1` est OBLIGATOIRE : la taille épinglée est
+    // arrondie au pair (`w & !1`), donc dès que la fenêtre a une dimension
+    // impaire (cas courant hors plein écran), videoscale doit changer le
+    // ratio source→cible et calcule un PAR non carré — qui déborde ici en
+    // valeur négative aberrante (ex. -842/121). nvh264enc grave ce PAR
+    // invalide dans la VUI de la SPS H.264 → tous les décodeurs rejettent la
+    // piste vidéo (« not-negotiated ») alors que l'audio reste lisible. En
+    // forçant des pixels carrés on évite le bug ; l'écart d'un pixel sur le
+    // ratio d'affichage est imperceptible.
     if let Some((width, height)) = spec.pinned_size() {
         args.push("videoscale".into());
         args.push("!".into());
-        args.push(format!("video/x-raw,width={width},height={height}"));
+        args.push(format!(
+            "video/x-raw,width={width},height={height},pixel-aspect-ratio=1/1"
+        ));
         args.push("!".into());
     }
     encoder.push_args(args, bitrate_kbps);
