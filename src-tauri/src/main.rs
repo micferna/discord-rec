@@ -15,6 +15,7 @@ mod updates;
 mod voice;
 #[cfg(windows)]
 mod win;
+mod winproc;
 #[cfg(unix)]
 mod x11;
 

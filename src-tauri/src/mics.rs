@@ -10,6 +10,8 @@ use serde::Serialize;
 
 #[cfg(unix)]
 use crate::appimage::CommandAppImageExt;
+#[cfg(windows)]
+use crate::winproc::CommandNoConsoleExt;
 
 #[derive(Clone, Serialize)]
 pub struct Mic {
@@ -65,6 +67,7 @@ pub async fn list() -> Vec<Mic> {
     let Ok(Ok(out)) = tokio::time::timeout(
         std::time::Duration::from_secs(10),
         tokio::process::Command::new(crate::recorder::gst_tool("gst-device-monitor-1.0"))
+            .no_console()
             .arg("Audio/Source")
             .stdin(std::process::Stdio::null())
             .output(),

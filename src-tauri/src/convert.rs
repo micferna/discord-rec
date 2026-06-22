@@ -26,6 +26,7 @@ use tokio::process::Command;
 
 use crate::appimage::CommandAppImageExt;
 use crate::recorder::{self, gst_tool, VideoEncoder};
+use crate::winproc::CommandNoConsoleExt;
 
 /// Nombre maximal de pistes audio sondées.
 const MAX_AUDIO_TRACKS: u32 = 16;
@@ -52,6 +53,7 @@ struct Probe {
 fn gst_cmd(output_dir: &Path) -> Command {
     let mut cmd = Command::new(gst_tool("gst-launch-1.0"));
     cmd.strip_appimage_env()
+        .no_console()
         .current_dir(output_dir)
         .stdin(Stdio::null());
     cmd

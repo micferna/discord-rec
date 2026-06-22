@@ -19,6 +19,7 @@ use tokio::process::{Child, Command};
 
 use crate::appimage::CommandAppImageExt;
 use crate::config::Config;
+use crate::winproc::CommandNoConsoleExt;
 
 const STOP_GRACE: Duration = Duration::from_secs(10);
 
@@ -298,6 +299,7 @@ pub(crate) fn gst_tool(name: &str) -> std::path::PathBuf {
 pub(crate) async fn element_exists(name: &str) -> bool {
     Command::new(gst_tool("gst-inspect-1.0"))
         .strip_appimage_env()
+        .no_console()
         .args(["--exists", name])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
