@@ -93,6 +93,7 @@ async function loadConfig() {
   }
   select.value = cfg.mic_target ?? "";
 
+  $("cfg-denoise").checked = cfg.mic_denoise;
   $("cfg-audiomode").value = cfg.mix_audio ? "mixed" : "separate";
 }
 
@@ -118,6 +119,7 @@ $("settings").addEventListener("submit", async (e) => {
         stop_debounce_s: Number($("cfg-debounce").value),
         mic_target: $("cfg-mic").value || null,
         mix_audio: $("cfg-audiomode").value === "mixed",
+        mic_denoise: $("cfg-denoise").checked,
       },
     });
     flash("réglages enregistrés ✓", true);
@@ -144,6 +146,55 @@ function fmtSize(bytes) {
   return Math.round(bytes / 1e3) + " ko";
 }
 
+// Résolutions proposées à la conversion (valeur = hauteur, "" = source).
+const RESOLUTIONS = [
+  ["", "Source"],
+  ["1080", "1080p"],
+  ["720", "720p"],
+  ["480", "480p"],
+];
+
+function showRecError(msg) {
+  const el = $("last-error");
+  el.hidden = false;
+  el.textContent = msg;
+}
+
+// Sélecteur de résolution + bouton « → MP4 » pour un enregistrement MKV.
+function buildConvertControls(f, meta) {
+  const sel = document.createElement("select");
+  sel.className = "tape-res";
+  sel.title = "Résolution du MP4";
+  for (const [value, label] of RESOLUTIONS) {
+    const opt = document.createElement("option");
+    opt.value = value;
+    opt.textContent = label;
+    sel.appendChild(opt);
+  }
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "btn btn-small tape-conv";
+  btn.textContent = "→ MP4";
+  btn.addEventListener("click", async () => {
+    const height = sel.value ? Number(sel.value) : null;
+    sel.disabled = true;
+    btn.disabled = true;
+    btn.textContent = "…";
+    meta.textContent = "conversion…";
+    try {
+      await invoke("convert_recording", { name: f.name, height });
+      refreshRecordings(); // le MP4 apparaît dans la liste
+    } catch (err) {
+      sel.disabled = false;
+      btn.disabled = false;
+      btn.textContent = "→ MP4";
+      meta.textContent = fmtSize(f.size_bytes);
+      showRecError(`conversion : ${err}`);
+    }
+  });
+  return [sel, btn];
+}
+
 async function refreshRecordings() {
   const files = await invoke("list_recordings");
   const ul = $("recordings");
@@ -160,10 +211,16 @@ async function refreshRecordings() {
     const name = document.createElement("span");
     name.className = "tape-name";
     name.textContent = f.name;
+    const actions = document.createElement("span");
+    actions.className = "tape-actions";
     const meta = document.createElement("span");
     meta.className = "tape-meta";
     meta.textContent = fmtSize(f.size_bytes);
-    li.append(name, meta);
+    actions.appendChild(meta);
+    if (f.name.toLowerCase().endsWith(".mkv")) {
+      actions.append(...buildConvertControls(f, meta));
+    }
+    li.append(name, actions);
     ul.appendChild(li);
   }
 }

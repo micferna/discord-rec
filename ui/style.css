@@ -6,6 +6,10 @@
    ─────────────────────────────────────────────────────────────── */
 
 :root {
+  /* Les contrôles natifs (liste déroulante des <select>, etc.) suivent le
+     thème sombre au lieu du blanc système par défaut de WebKitGTK. */
+  color-scheme: dark;
+
   /* Façade anodisée + renfoncements */
   --face:     #16171b;
   --face-2:   #1c1e24;
@@ -429,6 +433,13 @@ h1 {
   box-shadow: inset 0 1px 3px rgb(0 0 0 / 0.5), 0 0 0 2px rgb(126 17 13 / 0.35);
 }
 
+/* Liste déroulante : options sombres (le popup natif blanc jure avec la
+   façade). WebKitGTK n'honore qu'un sous-ensemble du style des <option>. */
+select option {
+  background: var(--face-2);
+  color: var(--ink);
+}
+
 .field-inline { flex-direction: row; align-items: center; gap: 9px; }
 .field-inline > span { font-size: 11px; letter-spacing: 0.03em; color: var(--ink); text-transform: none; }
 .field-inline input { accent-color: var(--rec); width: auto; flex: none; }
@@ -490,9 +501,18 @@ h1 {
 .tape-list li:last-child { border-bottom: none; }
 .tape-list li:hover { background: rgb(255 255 255 / 0.022); }
 
-.tape-name { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tape-name { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
 .tape-name::before { content: "▪"; color: var(--ink-3); margin-right: 8px; }
 .tape-meta { color: var(--ink-2); flex: none; font-variant-numeric: tabular-nums; }
+
+.tape-actions { display: flex; align-items: center; gap: 7px; flex: none; }
+.tape-res {
+  font-family: var(--mono); font-size: 10px; color: var(--ink);
+  background: var(--well); border: 1px solid var(--rail); border-radius: var(--r-s);
+  padding: 4px 5px; outline: none; cursor: pointer;
+}
+.tape-res:focus { border-color: var(--rec-deep); }
+.tape-conv { padding: 5px 8px; white-space: nowrap; }
 .tape-empty { color: var(--ink-3); justify-content: center; }
 .tape-empty::before { content: none; }
 

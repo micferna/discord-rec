@@ -146,23 +146,57 @@ fn mic_audio_tokens(mic: Option<&str>) -> Vec<String> {
     tokens
 }
 
-/// Branche audio « pistes séparées » : une source → son propre encodeur Opus
-/// → une piste du conteneur. Pratique au montage, mais beaucoup de lecteurs
-/// ne lisent que la première piste.
-fn audio_branch_separate(args: &mut Vec<String>, source: Vec<String>, bitrate_kbps: u32) {
-    args.extend(source);
-    for token in [
+/// Une source audio et son éventuel filtre de post-traitement, inséré juste
+/// après `audioresample` (donc avant l'encodeur Opus ou le mixeur). `filter`
+/// vide = aucun traitement. Sert à n'appliquer la réduction de bruit qu'au
+/// micro, sans toucher à la sortie Discord.
+struct AudioSource {
+    src: Vec<String>,
+    filter: Vec<String>,
+}
+
+/// Filtre de réduction de bruit (`webrtcdsp`) pour le micro. `webrtcdsp`
+/// n'accepte que du 8/16/32/48 kHz : on force 48 kHz en amont, puis on
+/// reconvertit pour l'encodeur. `echo-cancel=false` évite d'exiger un
+/// `webrtcechoprobe` (on ne fait que de la suppression de bruit).
+fn denoise_tokens() -> Vec<String> {
+    [
+        "audio/x-raw,rate=48000",
         "!",
-        "queue",
+        "webrtcdsp",
+        "echo-cancel=false",
+        "noise-suppression=true",
+        "noise-suppression-level=moderate",
+        "high-pass-filter=true",
         "!",
         "audioconvert",
         "!",
         "audioresample",
-        "!",
-        "opusenc",
-    ] {
+    ]
+    .iter()
+    .map(|s| (*s).to_owned())
+    .collect()
+}
+
+/// Insère, si présent, le filtre de la source juste après `audioresample`.
+fn push_filter(args: &mut Vec<String>, filter: &[String]) {
+    if !filter.is_empty() {
+        args.push("!".into());
+        args.extend(filter.iter().cloned());
+    }
+}
+
+/// Branche audio « pistes séparées » : une source → son propre encodeur Opus
+/// → une piste du conteneur. Pratique au montage, mais beaucoup de lecteurs
+/// ne lisent que la première piste.
+fn audio_branch_separate(args: &mut Vec<String>, source: &AudioSource, bitrate_kbps: u32) {
+    args.extend(source.src.iter().cloned());
+    for token in ["!", "queue", "!", "audioconvert", "!", "audioresample"] {
         args.push(token.into());
     }
+    push_filter(args, &source.filter);
+    args.push("!".into());
+    args.push("opusenc".into());
     args.push(format!("bitrate={}", u64::from(bitrate_kbps) * 1000));
     for token in ["!", "queue", "!", "mux."] {
         args.push(token.into());
@@ -171,7 +205,7 @@ fn audio_branch_separate(args: &mut Vec<String>, source: Vec<String>, bitrate_kb
 
 /// Branche audio « piste unique mixée » : toutes les sources entrent dans un
 /// `audiomixer` → un seul Opus → une piste. Audible dans tous les lecteurs.
-fn audio_branch_mixed(args: &mut Vec<String>, sources: &[Vec<String>], bitrate_kbps: u32) {
+fn audio_branch_mixed(args: &mut Vec<String>, sources: &[AudioSource], bitrate_kbps: u32) {
     // Le mixeur d'abord (nommé), suivi de l'encodeur et du mux.
     for token in [
         "audiomixer",
@@ -187,21 +221,15 @@ fn audio_branch_mixed(args: &mut Vec<String>, sources: &[Vec<String>], bitrate_k
     for token in ["!", "queue", "!", "mux."] {
         args.push(token.into());
     }
-    // Puis chaque source rejoint le mixeur.
+    // Puis chaque source rejoint le mixeur (avec son filtre éventuel).
     for source in sources {
-        args.extend(source.iter().cloned());
-        for token in [
-            "!",
-            "queue",
-            "!",
-            "audioconvert",
-            "!",
-            "audioresample",
-            "!",
-            "amix.",
-        ] {
+        args.extend(source.src.iter().cloned());
+        for token in ["!", "queue", "!", "audioconvert", "!", "audioresample"] {
             args.push(token.into());
         }
+        push_filter(args, &source.filter);
+        args.push("!".into());
+        args.push("amix.".into());
     }
 }
 
@@ -266,26 +294,36 @@ pub(crate) fn gst_tool(name: &str) -> std::path::PathBuf {
     std::path::PathBuf::from(name)
 }
 
+/// `true` si l'élément `GStreamer` nommé est installé (`gst-inspect --exists`).
+pub(crate) async fn element_exists(name: &str) -> bool {
+    Command::new(gst_tool("gst-inspect-1.0"))
+        .strip_appimage_env()
+        .args(["--exists", name])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .await
+        .is_ok_and(|s| s.success())
+}
+
 /// Détecte le meilleur encodeur disponible en interrogeant `GStreamer`.
 /// Le résultat dépend de la machine, pas de la session : il pourrait être
 /// mis en cache, mais l'appel (~50 ms) au démarrage d'un enregistrement
 /// reste négligeable et suit les installations/désinstallations de plugins.
 pub async fn detect_encoder() -> VideoEncoder {
     for &(element, encoder) in ENCODER_CANDIDATES {
-        let found = Command::new(gst_tool("gst-inspect-1.0"))
-            .strip_appimage_env()
-            .args(["--exists", element])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .await
-            .is_ok_and(|s| s.success());
-        if found {
+        if element_exists(element).await {
             return encoder;
         }
     }
     VideoEncoder::X264
+}
+
+/// `true` si la réduction de bruit micro est possible (plugin `webrtcdsp`,
+/// dans `gst-plugins-bad`). Sinon le micro est enregistré sans filtre.
+pub async fn denoise_available() -> bool {
+    element_exists("webrtcdsp").await
 }
 
 impl VideoEncoder {
@@ -304,7 +342,7 @@ impl VideoEncoder {
         }
     }
 
-    fn push_args(self, args: &mut Vec<String>, bitrate_kbps: u32) {
+    pub(crate) fn push_args(self, args: &mut Vec<String>, bitrate_kbps: u32) {
         match self {
             Self::Nvenc => {
                 args.push("nvh264enc".into());
@@ -428,6 +466,7 @@ impl Recording {
         audio_target: Option<u64>,
         video: Option<VideoSpec>,
         encoder: VideoEncoder,
+        denoise: bool,
     ) -> Result<Self> {
         ensure!(
             audio_target.is_some() || video.is_some(),
@@ -438,17 +477,28 @@ impl Recording {
         if let Some(spec) = &video {
             video_branch(&mut args, spec, encoder, cfg.video_bitrate_kbps);
         }
-        // Sources audio : sortie Discord (si trouvée) + micro.
-        let mut sources: Vec<Vec<String>> = Vec::new();
+        // Sources audio : sortie Discord (si trouvée), sans traitement, + micro,
+        // avec la réduction de bruit le cas échéant (sur le micro uniquement).
+        let mut sources: Vec<AudioSource> = Vec::new();
         if let Some(target) = audio_target {
-            sources.push(discord_audio_tokens(target));
+            sources.push(AudioSource {
+                src: discord_audio_tokens(target),
+                filter: Vec::new(),
+            });
         }
-        sources.push(mic_audio_tokens(cfg.mic_target.as_deref()));
+        sources.push(AudioSource {
+            src: mic_audio_tokens(cfg.mic_target.as_deref()),
+            filter: if denoise {
+                denoise_tokens()
+            } else {
+                Vec::new()
+            },
+        });
 
         if cfg.mix_audio {
             audio_branch_mixed(&mut args, &sources, cfg.audio_bitrate_kbps);
         } else {
-            for source in sources {
+            for source in &sources {
                 audio_branch_separate(&mut args, source, cfg.audio_bitrate_kbps);
             }
         }

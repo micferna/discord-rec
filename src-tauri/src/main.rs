@@ -2,6 +2,7 @@
 
 mod appimage;
 mod config;
+mod convert;
 mod instance;
 mod mics;
 #[cfg(unix)]
@@ -41,6 +42,7 @@ struct UiConfig {
     stop_debounce_s: u32,
     mic_target: Option<String>,
     mix_audio: bool,
+    mic_denoise: bool,
 }
 
 #[derive(Serialize)]
@@ -72,6 +74,7 @@ fn get_config(shared: SharedState) -> UiConfig {
         stop_debounce_s: cfg.stop_debounce_s,
         mic_target: cfg.mic_target,
         mix_audio: cfg.mix_audio,
+        mic_denoise: cfg.mic_denoise,
     }
 }
 
@@ -89,6 +92,7 @@ fn set_config(shared: SharedState, ui: UiConfig) -> Result<(), String> {
     cfg.stop_debounce_s = ui.stop_debounce_s;
     cfg.mic_target = ui.mic_target;
     cfg.mix_audio = ui.mix_audio;
+    cfg.mic_denoise = ui.mic_denoise;
     cfg.sanitize();
     config::save(&cfg).map_err(|e| format!("{e:#}"))
 }
@@ -122,10 +126,9 @@ fn list_recordings(shared: SharedState) -> Vec<RecFile> {
         .filter_map(|entry| {
             let entry = entry.ok()?;
             let name = entry.file_name().to_string_lossy().into_owned();
-            if !std::path::Path::new(&name)
-                .extension()
-                .is_some_and(|ext| ext.eq_ignore_ascii_case("mkv"))
-            {
+            if !std::path::Path::new(&name).extension().is_some_and(|ext| {
+                ext.eq_ignore_ascii_case("mkv") || ext.eq_ignore_ascii_case("mp4")
+            }) {
                 return None;
             }
             let meta = entry.metadata().ok()?;
@@ -177,6 +180,31 @@ fn open_recordings_dir(shared: SharedState) -> Result<(), String> {
     let dir = shared.config_snapshot().output_dir;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     open_with_system(dir.as_os_str())
+}
+
+/// Convertit un enregistrement MKV en MP4 (audio AAC, lisible partout).
+/// `height = None` garde la résolution source (copie vidéo sans perte) ;
+/// sinon réduit jusqu'à cette hauteur. Renvoie le nom du MP4 produit.
+#[tauri::command]
+async fn convert_recording(
+    shared: SharedState<'_>,
+    name: String,
+    height: Option<u32>,
+) -> Result<String, String> {
+    // Le nom doit rester un simple fichier du dossier de sortie.
+    if name.is_empty()
+        || name.contains('/')
+        || name.contains('\\')
+        || std::path::Path::new(&name)
+            .extension()
+            .is_none_or(|e| !e.eq_ignore_ascii_case("mkv"))
+    {
+        return Err("fichier à convertir invalide".into());
+    }
+    let dir = shared.config_snapshot().output_dir;
+    convert::to_mp4(&dir, &name, height)
+        .await
+        .map_err(|e| format!("{e:#}"))
 }
 
 /// Demande l'arrêt : la boucle de service finalise l'enregistrement en cours
@@ -271,6 +299,7 @@ fn main() {
             list_mics,
             reset_window_token,
             list_recordings,
+            convert_recording,
             open_recordings_dir,
             quit_app,
             updates::check_update,

@@ -156,7 +156,16 @@ async fn start_recording(shared: &Shared, snap: &voice::Snapshot) -> Result<Reco
         chrono::Local::now().format("%Y-%m-%d_%H-%M-%S")
     );
     let encoder = recorder::detect_encoder().await;
-    Recording::start(&cfg, &file_name, snap.audio_target, video, encoder)
+    // Réduction de bruit micro : seulement si demandée ET disponible. Demandée
+    // mais plugin absent → on enregistre quand même, avec une note.
+    let denoise = cfg.mic_denoise && recorder::denoise_available().await;
+    if cfg.mic_denoise && !denoise {
+        shared.set_error(Some(
+            "réduction de bruit indisponible (plugin webrtcdsp absent) — micro non filtré"
+                .to_owned(),
+        ));
+    }
+    Recording::start(&cfg, &file_name, snap.audio_target, video, encoder, denoise)
 }
 
 fn publish(app: &AppHandle, shared: &Shared, snap: &voice::Snapshot, rec: Option<&Recording>) {

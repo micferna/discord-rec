@@ -19,6 +19,9 @@ pub struct Config {
     /// `true` = micro et Discord mixés dans UNE piste (audible partout) ;
     /// `false` = deux pistes séparées (pratique au montage).
     pub mix_audio: bool,
+    /// Réduction de bruit appliquée au micro (et au micro seul) avant
+    /// l'encodage, via `webrtcdsp`. Ignoré si le plugin est absent.
+    pub mic_denoise: bool,
     /// Jeton du portail Wayland pour réutiliser la fenêtre choisie sans redemander.
     pub restore_token: Option<String>,
 }
@@ -37,6 +40,7 @@ impl Default for Config {
             stop_debounce_s: 3,
             mic_target: None,
             mix_audio: true,
+            mic_denoise: false,
             restore_token: None,
         }
     }

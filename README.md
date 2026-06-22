@@ -14,6 +14,10 @@ démarre ; quand tu quittes, il s'arrête et le fichier est finalisé.
   X11/XWayland** (`ximagesrc`) — aucune popup, aucun portail — H.264
 - Conteneur **MKV** (lisible même si l'enregistrement est interrompu),
   un fichier horodaté par session dans `~/Vidéos/discord-rec/`
+- **Réduction de bruit** optionnelle sur le micro (`webrtcdsp`)
+- **Conversion MKV→MP4** à la demande, avec choix de résolution
+  (Source / 1080p / 720p / 480p) : vidéo copiée sans perte ou réduite,
+  audio en AAC lisible partout
 
 ## Fonctionnement
 
@@ -33,7 +37,9 @@ démarre ; quand tu quittes, il s'arrête et le fichier est finalisé.
 
 - PipeWire (`pw-dump`)
 - GStreamer : `gstreamer1.0-tools`, `gstreamer1.0-pipewire`,
-  plugins good/bad/ugly (x264, opus, matroska)
+  plugins good/bad/ugly (x264, opus, matroska ; `webrtcdsp` pour la réduction
+  de bruit micro) et `gstreamer1.0-libav` (décodage H.264 + AAC pour la
+  conversion MKV→MP4). Le `.deb` les déclare en dépendances.
 - Tauri : `libwebkit2gtk-4.1-dev`, `libgtk-3-dev` (compilation)
 - `xdg-desktop-portal-gnome` (capture de fenêtre sous Wayland)
 
