@@ -285,17 +285,34 @@ async function checkUpdate() {
   $("update-banner").hidden = false;
 }
 
+// Vérifie les mises à jour sans relancer l'app : au démarrage, périodiquement
+// et au retour sur la fenêtre — mais au plus une fois toutes les 10 min (le
+// manifeste est un fichier statique, inutile de le marteler).
+let lastUpdateCheck = 0;
+function checkUpdateThrottled(force = false) {
+  const now = Date.now();
+  if (!force && now - lastUpdateCheck < 10 * 60 * 1000) return;
+  lastUpdateCheck = now;
+  checkUpdate();
+}
+
 /* ── Démarrage ───────────────────────────────────────────────── */
 
 listen("status", (event) => render(event.payload));
 listen("recording-saved", () => refreshRecordings());
 
-// La liste reflète aussi les fichiers supprimés/ajoutés HORS de l'app (ex.
-// effacés dans l'explorateur) : on relit le dossier au retour du focus, au
-// retour de visibilité, et par sondage léger tant que la fenêtre est visible.
-window.addEventListener("focus", refreshRecordings);
+// Au retour du focus / de visibilité : on relit le dossier (fichiers modifiés
+// hors de l'app) ET on revérifie les mises à jour, pour ne plus avoir à
+// relancer l'app pour voir une nouvelle version.
+window.addEventListener("focus", () => {
+  refreshRecordings();
+  checkUpdateThrottled();
+});
 document.addEventListener("visibilitychange", () => {
-  if (!document.hidden) refreshRecordings();
+  if (!document.hidden) {
+    refreshRecordings();
+    checkUpdateThrottled();
+  }
 });
 
 (async () => {
@@ -303,8 +320,8 @@ document.addEventListener("visibilitychange", () => {
   await loadConfig();
   await refreshRecordings();
   render(await invoke("get_status"));
-  setTimeout(checkUpdate, 5000);
-  setInterval(checkUpdate, 6 * 3600 * 1000); // re-vérifie toutes les 6 h
+  setTimeout(() => checkUpdateThrottled(true), 5000);
+  setInterval(() => checkUpdateThrottled(true), 30 * 60 * 1000); // toutes les 30 min
   setInterval(() => {
     if (!document.hidden) refreshRecordings();
   }, 5000);

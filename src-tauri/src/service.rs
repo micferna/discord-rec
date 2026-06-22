@@ -41,10 +41,11 @@ pub struct Shared {
 
 impl Shared {
     pub fn new(config: Config) -> Self {
+        let enabled = config.enabled;
         Self {
             config: Mutex::new(config),
             status: Mutex::new(Status::default()),
-            enabled: AtomicBool::new(true),
+            enabled: AtomicBool::new(enabled),
             quit: AtomicBool::new(false),
         }
     }

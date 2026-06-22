@@ -7,6 +7,10 @@ use serde::{Deserialize, Serialize};
 #[serde(default)]
 pub struct Config {
     pub output_dir: PathBuf,
+    /// État du bouton AUTO (enregistrement automatique). Persisté : une
+    /// désactivation manuelle survit au redémarrage (sinon l'app
+    /// réenregistrerait dès l'entrée en vocal au prochain lancement).
+    pub enabled: bool,
     pub video: bool,
     pub video_bitrate_kbps: u32,
     pub audio_bitrate_kbps: u32,
@@ -33,6 +37,7 @@ impl Default for Config {
             .unwrap_or_else(|| PathBuf::from("."));
         Self {
             output_dir: videos.join("discord-rec"),
+            enabled: true,
             video: true,
             video_bitrate_kbps: 8000,
             audio_bitrate_kbps: 128,
@@ -120,5 +125,21 @@ mod tests {
         let before = serde_json::to_string(&cfg).expect("sérialisation");
         cfg.sanitize();
         assert_eq!(before, serde_json::to_string(&cfg).expect("sérialisation"));
+    }
+
+    #[test]
+    fn enabled_persists_and_defaults_true() {
+        // Un AUTO désactivé survit à un round-trip JSON.
+        let cfg = Config {
+            enabled: false,
+            ..Config::default()
+        };
+        let json = serde_json::to_string(&cfg).expect("sérialisation");
+        let back: Config = serde_json::from_str(&json).expect("désérialisation");
+        assert!(!back.enabled);
+        // Config existante sans le champ (mise à jour depuis une ancienne
+        // version) → AUTO activé, comme avant l'ajout du réglage.
+        let legacy: Config = serde_json::from_str("{}").expect("désérialisation");
+        assert!(legacy.enabled);
     }
 }

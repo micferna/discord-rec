@@ -54,12 +54,19 @@ struct RecFile {
 
 #[tauri::command]
 fn get_status(shared: SharedState) -> Status {
-    shared.status.lock().expect("mutex status").clone()
+    let mut status = shared.status.lock().expect("mutex status").clone();
+    // Reflète l'état AUTO réel dès le premier rendu (avant le premier publish).
+    status.enabled = shared.enabled.load(Ordering::Relaxed);
+    status
 }
 
 #[tauri::command]
 fn set_enabled(shared: SharedState, enabled: bool) {
     shared.enabled.store(enabled, Ordering::Relaxed);
+    // Persiste l'état du bouton AUTO pour qu'il survive au redémarrage.
+    let mut cfg = shared.config.lock().expect("mutex config");
+    cfg.enabled = enabled;
+    let _ = config::save(&cfg);
 }
 
 #[tauri::command]
