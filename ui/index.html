@@ -58,6 +58,19 @@
         </div>
         <div class="deck-file" id="current-file">aucun enregistrement en cours</div>
       </div>
+      <div class="deck-clip" id="deck-clip" hidden>
+        <span class="deck-clip-label">CLIP&nbsp;DIRECT</span>
+        <button type="button" class="btn btn-small clip-live-btn" data-min="0.5">✂ 30 s</button>
+        <button type="button" class="btn btn-small clip-live-btn" data-min="1">✂ 1 min</button>
+        <button type="button" class="btn btn-small clip-live-btn" data-min="2">✂ 2 min</button>
+        <button type="button" class="btn btn-small clip-live-btn" data-min="5">✂ 5 min</button>
+        <span class="deck-clip-custom">
+          <input type="number" id="clip-live-custom" min="1" step="1" placeholder="s"
+                 title="Durée personnalisée, en secondes" aria-label="Durée personnalisée en secondes" />
+          <button type="button" class="btn btn-small" id="clip-live-custom-btn" title="Clipper cette durée">✂</button>
+        </span>
+        <span class="clip-msg" id="clip-live-msg"></span>
+      </div>
       <div class="deck-error" id="last-error" hidden></div>
     </section>
 
@@ -88,6 +101,10 @@
             <option value="mixed">Une piste mixée (audible partout)</option>
             <option value="separate">Deux pistes séparées (montage, VLC)</option>
           </select>
+        </label>
+        <label class="field field-inline">
+          <input type="checkbox" id="cfg-keep-last" />
+          <span title="Au démarrage d'un nouvel enregistrement, supprime les précédents (.mkv). Vos clips/MP4 exportés ne sont jamais touchés.">Ne garder que le dernier enregistrement</span>
         </label>
         <div class="field-row">
           <label class="field">
