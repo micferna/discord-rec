@@ -26,6 +26,10 @@ pub struct Config {
     /// Réduction de bruit appliquée au micro (et au micro seul) avant
     /// l'encodage, via `webrtcdsp`. Ignoré si le plugin est absent.
     pub mic_denoise: bool,
+    /// `true` = ne garder QUE le dernier enregistrement : au démarrage d'un
+    /// nouvel enregistrement, les `discord-*.mkv` précédents sont supprimés
+    /// (les MP4/clips exportés ne sont jamais touchés). Évite l'accumulation.
+    pub keep_only_last: bool,
     /// Jeton du portail Wayland pour réutiliser la fenêtre choisie sans redemander.
     pub restore_token: Option<String>,
 }
@@ -46,6 +50,7 @@ impl Default for Config {
             mic_target: None,
             mix_audio: true,
             mic_denoise: false,
+            keep_only_last: false,
             restore_token: None,
         }
     }

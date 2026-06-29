@@ -1,6 +1,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod appimage;
+#[cfg(unix)]
+mod clip;
 mod config;
 mod convert;
 mod instance;
@@ -44,6 +46,7 @@ struct UiConfig {
     mic_target: Option<String>,
     mix_audio: bool,
     mic_denoise: bool,
+    keep_only_last: bool,
 }
 
 #[derive(Serialize)]
@@ -83,6 +86,7 @@ fn get_config(shared: SharedState) -> UiConfig {
         mic_target: cfg.mic_target,
         mix_audio: cfg.mix_audio,
         mic_denoise: cfg.mic_denoise,
+        keep_only_last: cfg.keep_only_last,
     }
 }
 
@@ -101,6 +105,7 @@ fn set_config(shared: SharedState, ui: UiConfig) -> Result<(), String> {
     cfg.mic_target = ui.mic_target;
     cfg.mix_audio = ui.mix_audio;
     cfg.mic_denoise = ui.mic_denoise;
+    cfg.keep_only_last = ui.keep_only_last;
     cfg.sanitize();
     config::save(&cfg).map_err(|e| format!("{e:#}"))
 }
@@ -215,6 +220,127 @@ async fn convert_recording(
         .map_err(|e| format!("{e:#}"))
 }
 
+/// Marge (s) retirée du bord live d'un clip : le dernier cluster du MKV en
+/// cours d'écriture peut être incomplet, on s'arrête un peu avant.
+#[cfg(unix)]
+const LIVE_CLIP_MARGIN_S: f64 = 3.0;
+
+/// Vérifie qu'un nom désigne un simple fichier (mkv/mp4) du dossier de sortie.
+fn valid_media_name(name: &str) -> bool {
+    !name.is_empty()
+        && !name.contains('/')
+        && !name.contains('\\')
+        && std::path::Path::new(name)
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("mkv") || e.eq_ignore_ascii_case("mp4"))
+}
+
+/// Montage (B) : extrait `[start_s, start_s + duration_s]` d'un enregistrement
+/// existant vers un MP4. `height = None` garde la résolution source.
+#[tauri::command]
+async fn clip_range(
+    shared: SharedState<'_>,
+    name: String,
+    start_s: f64,
+    duration_s: f64,
+    height: Option<u32>,
+) -> Result<String, String> {
+    if !valid_media_name(&name) {
+        return Err("fichier à découper invalide".into());
+    }
+    #[cfg(unix)]
+    {
+        let dir = shared.config_snapshot().output_dir;
+        clip::clip(&dir, &name, start_s, duration_s, height)
+            .await
+            .map_err(|e| format!("{e:#}"))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (&shared, start_s, duration_s, height);
+        Err("le montage est disponible sur Linux pour l'instant".into())
+    }
+}
+
+/// Clip live (A) : « les `minutes` dernières minutes » de l'enregistrement en
+/// cours, sans l'arrêter. Lit le fichier et l'instant de début dans le statut
+/// publié, calcule la fenêtre (avec marge avant le bord live) et découpe.
+#[tauri::command]
+async fn clip_live(shared: SharedState<'_>, minutes: f64) -> Result<String, String> {
+    if !minutes.is_finite() || minutes <= 0.0 {
+        return Err("durée de clip invalide".into());
+    }
+    // Instantané du statut : fichier en cours + horodatage de début.
+    let (file, started_at_ms) = {
+        let status = shared.status.lock().expect("mutex status");
+        (status.file.clone(), status.started_at_ms)
+    };
+    let (Some(file), Some(started_at_ms)) = (file, started_at_ms) else {
+        return Err("aucun enregistrement en cours à clipper".into());
+    };
+
+    #[cfg(unix)]
+    {
+        let path = std::path::PathBuf::from(&file);
+        let dir = path.parent().map_or_else(
+            || shared.config_snapshot().output_dir,
+            std::path::Path::to_path_buf,
+        );
+        let name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .ok_or("nom de l'enregistrement en cours illisible")?
+            .to_owned();
+
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .ok()
+            .and_then(|d| u64::try_from(d.as_millis()).ok())
+            .unwrap_or(started_at_ms);
+        // Écoulé en ms (< 2^53) : conversion exacte en secondes flottantes.
+        #[allow(clippy::cast_precision_loss)]
+        let elapsed_s = now_ms.saturating_sub(started_at_ms) as f64 / 1000.0;
+        // On vise jusqu'à un peu avant le bord live (cluster en cours).
+        let stop_s = (elapsed_s - LIVE_CLIP_MARGIN_S).max(0.0);
+        let start_s = (stop_s - minutes * 60.0).max(0.0);
+        let duration_s = stop_s - start_s;
+        if duration_s < 1.0 {
+            return Err(
+                "enregistrement trop court pour ce clip (réessaie dans quelques secondes)".into(),
+            );
+        }
+        clip::clip(&dir, &name, start_s, duration_s, None)
+            .await
+            .map_err(|e| format!("{e:#}"))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (started_at_ms, file);
+        Err("le clip live est disponible sur Linux pour l'instant".into())
+    }
+}
+
+/// Durée (s) d'un enregistrement : l'interface de montage en a besoin pour
+/// borner les points d'entrée/sortie.
+#[tauri::command]
+async fn media_duration(shared: SharedState<'_>, name: String) -> Result<f64, String> {
+    if !valid_media_name(&name) {
+        return Err("fichier invalide".into());
+    }
+    #[cfg(unix)]
+    {
+        let dir = shared.config_snapshot().output_dir;
+        clip::duration(&dir, &name)
+            .await
+            .map_err(|e| format!("{e:#}"))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = &shared;
+        Err("indisponible sur cette plateforme".into())
+    }
+}
+
 /// Demande l'arrêt : la boucle de service finalise l'enregistrement en cours
 /// puis quitte l'application.
 #[tauri::command]
@@ -308,6 +434,9 @@ fn main() {
             reset_window_token,
             list_recordings,
             convert_recording,
+            clip_range,
+            clip_live,
+            media_duration,
             open_recordings_dir,
             quit_app,
             updates::check_update,

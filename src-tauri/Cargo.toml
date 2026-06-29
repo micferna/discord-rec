@@ -1,6 +1,6 @@
 [package]
 name = "discord-rec"
-version = "0.4.2"
+version = "0.5.0"
 edition = "2021"
 rust-version = "1.87"
 description = "Enregistre automatiquement (audio + vidéo) les sessions vocales Discord via PipeWire et X11/XWayland"
@@ -25,6 +25,14 @@ tauri-plugin-updater = "2.10.1"
 [target.'cfg(unix)'.dependencies]
 ashpd = { version = "0.13", default-features = false, features = ["tokio", "screencast"] }
 libc = "0.2"
+# Montage/clip : coupe par temps d'un enregistrement. gst-launch (utilisé
+# partout ailleurs) ne sait pas couper par temps ; on pilote donc le pipeline
+# par programme. Dépendance de BUILD uniquement — le runtime GStreamer est déjà
+# requis. Linux d'abord (cf. clip.rs gaté cfg(unix)). gstreamer-app fournit
+# appsink/appsrc : on découple le décodage (seekable) du muxage (qtmux ne
+# survit pas à un flush), pour ne décoder que la fenêtre voulue.
+gstreamer = "0.23"
+gstreamer-app = "0.23"
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62", features = [

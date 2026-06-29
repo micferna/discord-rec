@@ -34,6 +34,9 @@ function render(status) {
 
   document.querySelector(".deck").classList.toggle("live", status.recording);
 
+  // Clip direct (A) : visible seulement pendant un enregistrement.
+  $("deck-clip").hidden = !status.recording;
+
   $("headline").textContent = !status.enabled
     ? "auto désactivé"
     : status.recording
@@ -95,6 +98,7 @@ async function loadConfig() {
 
   $("cfg-denoise").checked = cfg.mic_denoise;
   $("cfg-audiomode").value = cfg.mix_audio ? "mixed" : "separate";
+  $("cfg-keep-last").checked = cfg.keep_only_last;
 }
 
 function flash(msg, ok) {
@@ -120,6 +124,7 @@ $("settings").addEventListener("submit", async (e) => {
         mic_target: $("cfg-mic").value || null,
         mix_audio: $("cfg-audiomode").value === "mixed",
         mic_denoise: $("cfg-denoise").checked,
+        keep_only_last: $("cfg-keep-last").checked,
       },
     });
     flash("réglages enregistrés ✓", true);
@@ -145,6 +150,66 @@ function fmtSize(bytes) {
   if (bytes >= 1e6) return (bytes / 1e6).toFixed(1) + " Mo";
   return Math.round(bytes / 1e3) + " ko";
 }
+
+// Durée lisible en secondes -> "mm:ss" (ou "h:mm:ss").
+function fmtTimecode(totalSeconds) {
+  const s = Math.max(0, Math.round(totalSeconds));
+  const pad = (n) => String(n).padStart(2, "0");
+  const h = Math.floor(s / 3600);
+  const rest = `${pad(Math.floor((s % 3600) / 60))}:${pad(s % 60)}`;
+  return h > 0 ? `${h}:${rest}` : rest;
+}
+
+// "mm:ss" / "h:mm:ss" / "90" -> secondes (NaN si invalide).
+function parseTimecode(text) {
+  const parts = text.trim().split(":").map((p) => p.trim());
+  if (parts.some((p) => p === "" || !/^\d+$/.test(p))) return NaN;
+  return parts.reduce((acc, p) => acc * 60 + Number(p), 0);
+}
+
+/* ── Clip direct (A) : les N dernières minutes du REC en cours ── */
+
+async function runLiveClip(minutes) {
+  const msg = $("clip-live-msg");
+  if (!Number.isFinite(minutes) || minutes <= 0) {
+    msg.className = "clip-msg err";
+    msg.textContent = "durée invalide";
+    return;
+  }
+  const buttons = $("deck-clip").querySelectorAll("button");
+  buttons.forEach((b) => (b.disabled = true));
+  msg.className = "clip-msg";
+  msg.textContent = "découpe…";
+  try {
+    const out = await invoke("clip_live", { minutes });
+    msg.className = "clip-msg ok";
+    msg.textContent = `clip prêt : ${out}`;
+    refreshRecordings();
+  } catch (err) {
+    msg.className = "clip-msg err";
+    msg.textContent = String(err);
+  } finally {
+    buttons.forEach((b) => (b.disabled = false));
+    setTimeout(() => {
+      if (msg.textContent) msg.textContent = "";
+    }, 8000);
+  }
+}
+
+// Champ personnalisé : durée saisie en secondes (clip_live attend des minutes).
+function runLiveClipCustom() {
+  const seconds = Number($("clip-live-custom").value);
+  runLiveClip(seconds / 60);
+}
+
+$("deck-clip").addEventListener("click", (e) => {
+  const preset = e.target.closest(".clip-live-btn");
+  if (preset) runLiveClip(Number(preset.dataset.min));
+});
+$("clip-live-custom-btn").addEventListener("click", runLiveClipCustom);
+$("clip-live-custom").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") runLiveClipCustom();
+});
 
 // Résolutions proposées à la conversion (valeur = hauteur, "" = source).
 const RESOLUTIONS = [
@@ -195,6 +260,115 @@ function buildConvertControls(f, meta) {
   return [sel, btn];
 }
 
+/* ── Montage (B) : extrait point d'entrée → point de sortie ──── */
+
+// Bouton ✂ + panneau pliable (début / durée / résolution / exporter) pour un
+// enregistrement. La durée totale est chargée à la première ouverture.
+function buildClipControls(f) {
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.className = "btn btn-small tape-cut";
+  toggle.textContent = "✂";
+  toggle.title = "Découper un extrait";
+
+  const panel = document.createElement("div");
+  panel.className = "tape-clip";
+  panel.hidden = true;
+
+  const mkField = (labelText, input) => {
+    const lab = document.createElement("label");
+    lab.className = "tape-clip-field";
+    const span = document.createElement("span");
+    span.textContent = labelText;
+    lab.append(span, input);
+    return lab;
+  };
+
+  const start = document.createElement("input");
+  start.type = "text";
+  start.value = "0:00";
+  start.spellcheck = false;
+  start.setAttribute("aria-label", "Début (mm:ss)");
+
+  const dur = document.createElement("input");
+  dur.type = "number";
+  dur.min = "1";
+  dur.value = "30";
+  dur.setAttribute("aria-label", "Durée (secondes)");
+
+  const res = document.createElement("select");
+  res.className = "tape-res";
+  res.title = "Résolution du clip";
+  for (const [value, label] of RESOLUTIONS) {
+    const opt = document.createElement("option");
+    opt.value = value;
+    opt.textContent = label;
+    res.appendChild(opt);
+  }
+
+  const go = document.createElement("button");
+  go.type = "button";
+  go.className = "btn btn-small btn-accent";
+  go.textContent = "Exporter";
+
+  const msg = document.createElement("span");
+  msg.className = "clip-msg tape-clip-info";
+
+  panel.append(mkField("de", start), mkField("durée (s)", dur), res, go, msg);
+
+  let durationLoaded = false;
+  toggle.addEventListener("click", async () => {
+    panel.hidden = !panel.hidden;
+    toggle.classList.toggle("on", !panel.hidden);
+    if (panel.hidden || durationLoaded) return;
+    durationLoaded = true;
+    try {
+      const total = await invoke("media_duration", { name: f.name });
+      msg.className = "clip-msg tape-clip-info";
+      msg.textContent = `durée totale ${fmtTimecode(total)}`;
+    } catch {
+      msg.textContent = "";
+    }
+  });
+
+  go.addEventListener("click", async () => {
+    const startS = parseTimecode(start.value);
+    const durationS = Number(dur.value);
+    if (!Number.isFinite(startS) || startS < 0) {
+      msg.className = "clip-msg err";
+      msg.textContent = "début invalide (mm:ss)";
+      return;
+    }
+    if (!Number.isFinite(durationS) || durationS <= 0) {
+      msg.className = "clip-msg err";
+      msg.textContent = "durée invalide";
+      return;
+    }
+    const height = res.value ? Number(res.value) : null;
+    go.disabled = true;
+    msg.className = "clip-msg";
+    msg.textContent = "découpe…";
+    try {
+      const out = await invoke("clip_range", {
+        name: f.name,
+        startS,
+        durationS,
+        height,
+      });
+      msg.className = "clip-msg ok";
+      msg.textContent = `clip prêt : ${out}`;
+      refreshRecordings();
+    } catch (err) {
+      msg.className = "clip-msg err";
+      msg.textContent = String(err);
+    } finally {
+      go.disabled = false;
+    }
+  });
+
+  return { toggle, panel };
+}
+
 async function refreshRecordings() {
   const files = await invoke("list_recordings");
   const ul = $("recordings");
@@ -220,7 +394,10 @@ async function refreshRecordings() {
     if (f.name.toLowerCase().endsWith(".mkv")) {
       actions.append(...buildConvertControls(f, meta));
     }
-    li.append(name, actions);
+    // Montage : découpe un extrait de n'importe quel enregistrement (mkv/mp4).
+    const { toggle, panel } = buildClipControls(f);
+    actions.appendChild(toggle);
+    li.append(name, actions, panel);
     ul.appendChild(li);
   }
 }
@@ -304,13 +481,20 @@ listen("recording-saved", () => refreshRecordings());
 // Au retour du focus / de visibilité : on relit le dossier (fichiers modifiés
 // hors de l'app) ET on revérifie les mises à jour, pour ne plus avoir à
 // relancer l'app pour voir une nouvelle version.
-window.addEventListener("focus", () => {
+// Rafraîchissement auto : on ne reconstruit PAS la liste si un panneau de
+// montage est ouvert (sinon la saisie début/durée serait perdue).
+function autoRefreshRecordings() {
+  if (document.querySelector(".tape-clip:not([hidden])")) return;
   refreshRecordings();
+}
+
+window.addEventListener("focus", () => {
+  autoRefreshRecordings();
   checkUpdateThrottled();
 });
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden) {
-    refreshRecordings();
+    autoRefreshRecordings();
     checkUpdateThrottled();
   }
 });
@@ -323,6 +507,6 @@ document.addEventListener("visibilitychange", () => {
   setTimeout(() => checkUpdateThrottled(true), 5000);
   setInterval(() => checkUpdateThrottled(true), 30 * 60 * 1000); // toutes les 30 min
   setInterval(() => {
-    if (!document.hidden) refreshRecordings();
+    if (!document.hidden) autoRefreshRecordings();
   }, 5000);
 })();

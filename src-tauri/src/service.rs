@@ -193,6 +193,33 @@ fn publish(app: &AppHandle, shared: &Shared, snap: &voice::Snapshot, rec: Option
     let _ = app.emit("status", &status);
 }
 
+/// Supprime les enregistrements `discord-*.mkv` du dossier de sortie, sauf
+/// `keep` (le nouvel enregistrement qui vient de démarrer). Ne touche JAMAIS
+/// aux exports (`.mp4`, clips) ni à un autre fichier : on ne cible que les
+/// `.mkv` au nom généré par l'app.
+fn prune_old_recordings(keep: &std::path::Path) {
+    let (Some(dir), Some(keep_name)) = (keep.parent(), keep.file_name()) else {
+        return;
+    };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        if name == keep_name {
+            continue;
+        }
+        let lossy = name.to_string_lossy();
+        let is_recording = lossy.starts_with("discord-")
+            && std::path::Path::new(&*lossy)
+                .extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("mkv"));
+        if is_recording {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+}
+
 pub async fn run(app: AppHandle, shared: Arc<Shared>) {
     let mut rec: Option<Recording> = None;
     let mut absent_ticks: u32 = 0;
@@ -240,7 +267,15 @@ pub async fn run(app: AppHandle, shared: Arc<Shared>) {
                     cooldown -= 1;
                 } else {
                     match start_recording(&shared, &snap).await {
-                        Ok(r) => rec = Some(r),
+                        Ok(r) => {
+                            // Option « ne garder que le dernier » : on supprime
+                            // les enregistrements précédents (jamais les exports
+                            // MP4/clips), maintenant qu'un nouveau a démarré.
+                            if shared.config_snapshot().keep_only_last {
+                                prune_old_recordings(&r.file);
+                            }
+                            rec = Some(r);
+                        }
                         Err(e) => {
                             shared.set_error(Some(format!("démarrage impossible : {e:#}")));
                             cooldown = RETRY_COOLDOWN_TICKS;
@@ -266,5 +301,53 @@ pub async fn run(app: AppHandle, shared: Arc<Shared>) {
         }
 
         publish(&app, &shared, &snap, rec.as_ref());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::prune_old_recordings;
+
+    #[test]
+    fn prune_keeps_current_and_spares_exports() {
+        let dir = std::env::temp_dir().join(format!("disc-rec-prunetest-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("dossier de test");
+        let touch = |name: &str| std::fs::write(dir.join(name), b"x").expect("écriture");
+
+        let keep = dir.join("discord-2026-06-29_10-00-00.mkv");
+        touch("discord-2026-06-29_10-00-00.mkv"); // l'enregistrement courant
+        touch("discord-2026-06-28_09-00-00.mkv"); // ancien REC → à supprimer
+        touch("discord-2026-06-27_08-00-00.mkv"); // ancien REC → à supprimer
+        touch("discord-2026-06-28_09-00-00.mp4"); // export MP4 → à garder
+        touch("discord-2026-06-28_09-00-00_clip_0-30s.mp4"); // clip → à garder
+        touch("notes.txt"); // fichier tiers → à garder
+
+        prune_old_recordings(&keep);
+
+        let exists = |name: &str| dir.join(name).exists();
+        assert!(
+            exists("discord-2026-06-29_10-00-00.mkv"),
+            "courant supprimé"
+        );
+        assert!(
+            !exists("discord-2026-06-28_09-00-00.mkv"),
+            "ancien REC gardé"
+        );
+        assert!(
+            !exists("discord-2026-06-27_08-00-00.mkv"),
+            "ancien REC gardé"
+        );
+        assert!(
+            exists("discord-2026-06-28_09-00-00.mp4"),
+            "export MP4 supprimé"
+        );
+        assert!(
+            exists("discord-2026-06-28_09-00-00_clip_0-30s.mp4"),
+            "clip supprimé"
+        );
+        assert!(exists("notes.txt"), "fichier tiers supprimé");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
