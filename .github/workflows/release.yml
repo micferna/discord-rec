@@ -63,7 +63,10 @@ jobs:
       # Provenance vérifiable : prouve que chaque binaire sort de cette CI,
       # depuis ce commit. Vérification :
       #   gh attestation verify <fichier> --repo micferna/discord-rec
+      # Best-effort : une panne transitoire du service sigstore (tlog 404, …) ne
+      # doit pas faire échouer la release — les binaires restent signés (minisign).
       - name: Attestation de provenance
+        continue-on-error: true
         uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
         with:
           subject-path: ${{ matrix.artifacts }}
