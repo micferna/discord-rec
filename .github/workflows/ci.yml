@@ -77,8 +77,12 @@ jobs:
             $dest = "$dir\$msi"
             if (-not (Test-Path $dest)) {
               Write-Host "Downloading $msi"
-              curl.exe -L --fail --retry 8 --retry-delay 20 --retry-max-time 600 --connect-timeout 30 -o $dest "$base/$msi"
-              if ($LASTEXITCODE -ne 0) { throw "échec du téléchargement : $msi" }
+              $ok = $false
+              for ($i = 1; $i -le 12 -and -not $ok; $i++) {
+                curl.exe -L --fail -C - --connect-timeout 30 --max-time 600 -o $dest "$base/$msi"
+                if ($LASTEXITCODE -eq 0) { $ok = $true } else { Write-Host "reprise $i"; Start-Sleep 10 }
+              }
+              if (-not $ok) { throw "échec du téléchargement : $msi" }
             } else { Write-Host "$msi (cache)" }
             Start-Process msiexec.exe -ArgumentList "/i `"$dest`" /quiet ADDLOCAL=ALL" -Wait -NoNewWindow
           }
