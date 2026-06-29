@@ -63,7 +63,7 @@ jobs:
         shell: pwsh
         working-directory: ${{ runner.temp }}
         run: |
-          $ver = "1.26.0"
+          $ver = "1.26.11"
           $base = "https://gstreamer.freedesktop.org/data/pkg/windows/$ver/msvc"
           foreach ($msi in @("gstreamer-1.0-msvc-x86_64-$ver.msi", "gstreamer-1.0-devel-msvc-x86_64-$ver.msi")) {
             Write-Host "Downloading $msi"
