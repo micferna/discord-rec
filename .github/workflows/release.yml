@@ -51,8 +51,9 @@ jobs:
           $ver = "1.26.0"
           $base = "https://gstreamer.freedesktop.org/data/pkg/windows/$ver/msvc"
           foreach ($msi in @("gstreamer-1.0-msvc-x86_64-$ver.msi", "gstreamer-1.0-devel-msvc-x86_64-$ver.msi")) {
-            Write-Host "Installing $msi"
-            Invoke-WebRequest -Uri "$base/$msi" -OutFile $msi
+            Write-Host "Downloading $msi"
+            curl.exe -L --fail --retry 5 --retry-all-errors --connect-timeout 30 -o $msi "$base/$msi"
+            if ($LASTEXITCODE -ne 0) { throw "échec du téléchargement : $msi" }
             Start-Process msiexec.exe -ArgumentList "/i `"$msi`" /quiet ADDLOCAL=ALL" -Wait -NoNewWindow
           }
           $root = "C:\gstreamer\1.0\msvc_x86_64"
