@@ -295,6 +295,26 @@ pub(crate) fn gst_tool(name: &str) -> std::path::PathBuf {
     std::path::PathBuf::from(name)
 }
 
+/// Dossier `bin` de l'installation `GStreamer` sous Windows (contient les DLL).
+/// Sert à `main()` pour l'ajouter au PATH avant le 1er appel au crate
+/// `gstreamer` (DLL en delay-load, cf. `build.rs`) — l'installeur officiel ne
+/// met pas ce dossier dans le PATH. Mêmes racines candidates que `gst_tool`.
+#[cfg(windows)]
+pub(crate) fn gstreamer_bin_dir() -> Option<std::path::PathBuf> {
+    let roots = [
+        std::env::var_os("GSTREAMER_1_0_ROOT_MSVC_X86_64"),
+        std::env::var_os("GSTREAMER_1_0_ROOT_MINGW_X86_64"),
+        std::env::var_os("GSTREAMER_1_0_ROOT_X86_64"),
+        Some(std::ffi::OsString::from(r"C:\gstreamer\1.0\msvc_x86_64")),
+        Some(std::ffi::OsString::from(r"C:\gstreamer\1.0\mingw_x86_64")),
+    ];
+    roots
+        .into_iter()
+        .flatten()
+        .map(|root| std::path::Path::new(&root).join("bin"))
+        .find(|bin| bin.is_dir())
+}
+
 /// `true` si l'élément `GStreamer` nommé est installé (`gst-inspect --exists`).
 pub(crate) async fn element_exists(name: &str) -> bool {
     Command::new(gst_tool("gst-inspect-1.0"))

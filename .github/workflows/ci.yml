@@ -56,6 +56,26 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
+      # Le crate gstreamer (montage/clip) lie GStreamer : il faut le dev-kit
+      # MSVC + pkg-config. Le runtime complet (ADDLOCAL=ALL) fournit aussi les
+      # plugins (x264enc…) pour que les tests de coupe tournent réellement.
+      - name: GStreamer (dev + runtime, MSVC)
+        shell: pwsh
+        working-directory: ${{ runner.temp }}
+        run: |
+          choco install pkgconfiglite -y --no-progress
+          $ver = "1.26.0"
+          $base = "https://gstreamer.freedesktop.org/data/pkg/windows/$ver/msvc"
+          foreach ($msi in @("gstreamer-1.0-msvc-x86_64-$ver.msi", "gstreamer-1.0-devel-msvc-x86_64-$ver.msi")) {
+            Write-Host "Installing $msi"
+            Invoke-WebRequest -Uri "$base/$msi" -OutFile $msi
+            Start-Process msiexec.exe -ArgumentList "/i `"$msi`" /quiet ADDLOCAL=ALL" -Wait -NoNewWindow
+          }
+          $root = "C:\gstreamer\1.0\msvc_x86_64"
+          "PKG_CONFIG_PATH=$root\lib\pkgconfig" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "GSTREAMER_1_0_ROOT_MSVC_X86_64=$root\" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "$root\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
           toolchain: stable

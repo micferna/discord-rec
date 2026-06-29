@@ -27,9 +27,10 @@
 //! en filet de sécurité si le seek échoue (fichier en cours sans index) :
 //! décodage depuis 0, drop hors fenêtre, EOS franc à `stop`.
 //!
-//! Linux d'abord : ce module est gaté `cfg(unix)` et les crates `gstreamer` /
-//! `gstreamer-app` sont des dépendances Unix uniquement (build Windows
-//! inchangé).
+//! Cross-plateforme (Linux + Windows). Sous Windows, les DLL `GStreamer` liées
+//! par le crate sont chargées en *delay-load* (cf. `build.rs`) et le dossier
+//! `bin` de `GStreamer` est ajouté au PATH au démarrage (`add_gstreamer_dll_dir`
+//! dans `main.rs`), car l'installeur officiel ne l'y met pas.
 
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -91,6 +92,24 @@ fn make_video_encoder(encoder: VideoEncoder, bitrate_kbps: u32) -> Result<gst::E
                 ("key-int-max", "120".into()),
             ],
         ),
+        #[cfg(windows)]
+        VideoEncoder::Qsv => (
+            "qsvh264enc",
+            vec![
+                ("bitrate", bitrate_kbps.to_string()),
+                ("gop-size", "120".into()),
+            ],
+        ),
+        #[cfg(windows)]
+        VideoEncoder::Amf => (
+            "amfh264enc",
+            vec![
+                ("bitrate", bitrate_kbps.to_string()),
+                ("gop-size", "120".into()),
+            ],
+        ),
+        #[cfg(windows)]
+        VideoEncoder::MediaFoundation => ("mfh264enc", vec![("bitrate", bitrate_kbps.to_string())]),
         VideoEncoder::X264 => (
             "x264enc",
             vec![

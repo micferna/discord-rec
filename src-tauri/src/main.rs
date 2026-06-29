@@ -1,7 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod appimage;
-#[cfg(unix)]
 mod clip;
 mod config;
 mod convert;
@@ -222,7 +221,6 @@ async fn convert_recording(
 
 /// Marge (s) retirée du bord live d'un clip : le dernier cluster du MKV en
 /// cours d'écriture peut être incomplet, on s'arrête un peu avant.
-#[cfg(unix)]
 const LIVE_CLIP_MARGIN_S: f64 = 3.0;
 
 /// Vérifie qu'un nom désigne un simple fichier (mkv/mp4) du dossier de sortie.
@@ -248,18 +246,10 @@ async fn clip_range(
     if !valid_media_name(&name) {
         return Err("fichier à découper invalide".into());
     }
-    #[cfg(unix)]
-    {
-        let dir = shared.config_snapshot().output_dir;
-        clip::clip(&dir, &name, start_s, duration_s, height)
-            .await
-            .map_err(|e| format!("{e:#}"))
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = (&shared, start_s, duration_s, height);
-        Err("le montage est disponible sur Linux pour l'instant".into())
-    }
+    let dir = shared.config_snapshot().output_dir;
+    clip::clip(&dir, &name, start_s, duration_s, height)
+        .await
+        .map_err(|e| format!("{e:#}"))
 }
 
 /// Clip live (A) : « les `minutes` dernières minutes » de l'enregistrement en
@@ -279,45 +269,37 @@ async fn clip_live(shared: SharedState<'_>, minutes: f64) -> Result<String, Stri
         return Err("aucun enregistrement en cours à clipper".into());
     };
 
-    #[cfg(unix)]
-    {
-        let path = std::path::PathBuf::from(&file);
-        let dir = path.parent().map_or_else(
-            || shared.config_snapshot().output_dir,
-            std::path::Path::to_path_buf,
-        );
-        let name = path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .ok_or("nom de l'enregistrement en cours illisible")?
-            .to_owned();
+    let path = std::path::PathBuf::from(&file);
+    let dir = path.parent().map_or_else(
+        || shared.config_snapshot().output_dir,
+        std::path::Path::to_path_buf,
+    );
+    let name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or("nom de l'enregistrement en cours illisible")?
+        .to_owned();
 
-        let now_ms = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .ok()
-            .and_then(|d| u64::try_from(d.as_millis()).ok())
-            .unwrap_or(started_at_ms);
-        // Écoulé en ms (< 2^53) : conversion exacte en secondes flottantes.
-        #[allow(clippy::cast_precision_loss)]
-        let elapsed_s = now_ms.saturating_sub(started_at_ms) as f64 / 1000.0;
-        // On vise jusqu'à un peu avant le bord live (cluster en cours).
-        let stop_s = (elapsed_s - LIVE_CLIP_MARGIN_S).max(0.0);
-        let start_s = (stop_s - minutes * 60.0).max(0.0);
-        let duration_s = stop_s - start_s;
-        if duration_s < 1.0 {
-            return Err(
-                "enregistrement trop court pour ce clip (réessaie dans quelques secondes)".into(),
-            );
-        }
-        clip::clip(&dir, &name, start_s, duration_s, None)
-            .await
-            .map_err(|e| format!("{e:#}"))
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .and_then(|d| u64::try_from(d.as_millis()).ok())
+        .unwrap_or(started_at_ms);
+    // Écoulé en ms (< 2^53) : conversion exacte en secondes flottantes.
+    #[allow(clippy::cast_precision_loss)]
+    let elapsed_s = now_ms.saturating_sub(started_at_ms) as f64 / 1000.0;
+    // On vise jusqu'à un peu avant le bord live (cluster en cours).
+    let stop_s = (elapsed_s - LIVE_CLIP_MARGIN_S).max(0.0);
+    let start_s = (stop_s - minutes * 60.0).max(0.0);
+    let duration_s = stop_s - start_s;
+    if duration_s < 1.0 {
+        return Err(
+            "enregistrement trop court pour ce clip (réessaie dans quelques secondes)".into(),
+        );
     }
-    #[cfg(not(unix))]
-    {
-        let _ = (started_at_ms, file);
-        Err("le clip live est disponible sur Linux pour l'instant".into())
-    }
+    clip::clip(&dir, &name, start_s, duration_s, None)
+        .await
+        .map_err(|e| format!("{e:#}"))
 }
 
 /// Durée (s) d'un enregistrement : l'interface de montage en a besoin pour
@@ -327,18 +309,10 @@ async fn media_duration(shared: SharedState<'_>, name: String) -> Result<f64, St
     if !valid_media_name(&name) {
         return Err("fichier invalide".into());
     }
-    #[cfg(unix)]
-    {
-        let dir = shared.config_snapshot().output_dir;
-        clip::duration(&dir, &name)
-            .await
-            .map_err(|e| format!("{e:#}"))
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = &shared;
-        Err("indisponible sur cette plateforme".into())
-    }
+    let dir = shared.config_snapshot().output_dir;
+    clip::duration(&dir, &name)
+        .await
+        .map_err(|e| format!("{e:#}"))
 }
 
 /// Demande l'arrêt : la boucle de service finalise l'enregistrement en cours
@@ -391,7 +365,27 @@ fn build_tray(app: &tauri::AppHandle, shared: Arc<Shared>) -> tauri::Result<()> 
     Ok(())
 }
 
+/// Windows : ajoute le dossier `bin` de `GStreamer` au PATH du processus, pour
+/// que les DLL `GStreamer` (liées en delay-load, cf. `build.rs`) soient
+/// trouvées au 1er appel du crate `gstreamer` (montage/clip) — l'installeur
+/// officiel ne met pas ce dossier dans le PATH. Avant tout appel `GStreamer`.
+#[cfg(windows)]
+fn add_gstreamer_dll_dir() {
+    let Some(bin) = recorder::gstreamer_bin_dir() else {
+        return;
+    };
+    let mut path = bin.into_os_string();
+    if let Some(existing) = std::env::var_os("PATH") {
+        path.push(";");
+        path.push(existing);
+    }
+    std::env::set_var("PATH", path);
+}
+
 fn main() {
+    #[cfg(windows)]
+    add_gstreamer_dll_dir();
+
     // Avant tout : couper les instances obsolètes encore en mémoire (ancienne
     // version dont le binaire a été remplacé par une mise à jour). Sinon
     // single-instance refocaliserait cette vieille fenêtre, qui réafficherait
