@@ -58,18 +58,29 @@ jobs:
 
       # Le crate gstreamer (montage/clip) lie GStreamer : il faut le dev-kit
       # MSVC + pkg-config. Le runtime complet (ADDLOCAL=ALL) fournit aussi les
-      # plugins (x264enc…) pour que les tests de coupe tournent réellement.
+      # plugins (x264enc…) pour que les tests de coupe tournent réellement. Les
+      # MSI sont mis en cache : le serveur freedesktop est instable
+      # (503/404/coupures) — une fois téléchargés, on les réutilise.
+      - name: Cache GStreamer MSIs
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}\gst-msi
+          key: gst-msi-1.26.11
       - name: GStreamer (dev + runtime, MSVC)
         shell: pwsh
-        working-directory: ${{ runner.temp }}
         run: |
           $ver = "1.26.11"
+          $dir = "$env:RUNNER_TEMP\gst-msi"
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
           $base = "https://gstreamer.freedesktop.org/data/pkg/windows/$ver/msvc"
           foreach ($msi in @("gstreamer-1.0-msvc-x86_64-$ver.msi", "gstreamer-1.0-devel-msvc-x86_64-$ver.msi")) {
-            Write-Host "Downloading $msi"
-            curl.exe -L --fail --retry 5 --retry-all-errors --connect-timeout 30 -o $msi "$base/$msi"
-            if ($LASTEXITCODE -ne 0) { throw "échec du téléchargement : $msi" }
-            Start-Process msiexec.exe -ArgumentList "/i `"$msi`" /quiet ADDLOCAL=ALL" -Wait -NoNewWindow
+            $dest = "$dir\$msi"
+            if (-not (Test-Path $dest)) {
+              Write-Host "Downloading $msi"
+              curl.exe -L --fail --retry 8 --retry-delay 20 --retry-max-time 600 --connect-timeout 30 -o $dest "$base/$msi"
+              if ($LASTEXITCODE -ne 0) { throw "échec du téléchargement : $msi" }
+            } else { Write-Host "$msi (cache)" }
+            Start-Process msiexec.exe -ArgumentList "/i `"$dest`" /quiet ADDLOCAL=ALL" -Wait -NoNewWindow
           }
           $root = "C:\gstreamer\1.0\msvc_x86_64"
           # pkgconf (séparateur ';' natif Windows) via MSYS2 préinstallé :
