@@ -63,7 +63,6 @@ jobs:
         shell: pwsh
         working-directory: ${{ runner.temp }}
         run: |
-          choco install pkgconfiglite -y --no-progress
           $ver = "1.26.0"
           $base = "https://gstreamer.freedesktop.org/data/pkg/windows/$ver/msvc"
           foreach ($msi in @("gstreamer-1.0-msvc-x86_64-$ver.msi", "gstreamer-1.0-devel-msvc-x86_64-$ver.msi")) {
@@ -72,6 +71,15 @@ jobs:
             Start-Process msiexec.exe -ArgumentList "/i `"$msi`" /quiet ADDLOCAL=ALL" -Wait -NoNewWindow
           }
           $root = "C:\gstreamer\1.0\msvc_x86_64"
+          # On utilise le pkg-config fourni PAR GStreamer (séparateur ';'
+          # Windows). pkgconfiglite couperait PKG_CONFIG_PATH sur le ':' de 'C:'
+          # et ne trouverait pas glib-2.0.pc. On force le binaire via PKG_CONFIG.
+          $pc = "$root\bin\pkg-config.exe"
+          if (-not (Test-Path $pc)) { $pc = "$root\bin\pkgconf.exe" }
+          if (-not (Test-Path $pc)) { Get-ChildItem "$root\bin" -Filter "pkg*"; throw "pkg-config introuvable dans GStreamer" }
+          $env:PKG_CONFIG_PATH = "$root\lib\pkgconfig"
+          & $pc --modversion glib-2.0 gstreamer-1.0
+          "PKG_CONFIG=$pc" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           "PKG_CONFIG_PATH=$root\lib\pkgconfig" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           "GSTREAMER_1_0_ROOT_MSVC_X86_64=$root\" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           "$root\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
