@@ -794,7 +794,10 @@ mod tests {
         // Slashes avant : la syntaxe de gst-launch traite '\' comme un
         // échappement, donc un chemin Windows en backslashes serait mal
         // interprété (le MKV irait ailleurs). gstreamer accepte les '/'.
-        args.push(format!("location={}", src.display().to_string().replace('\\', "/")));
+        args.push(format!(
+            "location={}",
+            src.display().to_string().replace('\\', "/")
+        ));
         for _ in 0..audio_tracks {
             for token in [
                 "audiotestsrc",
