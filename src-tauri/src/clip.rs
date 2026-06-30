@@ -797,7 +797,7 @@ mod tests {
                 args.push(token.to_owned());
             }
         }
-        let status = std::process::Command::new("gst-launch-1.0")
+        let status = std::process::Command::new(crate::recorder::gst_tool("gst-launch-1.0"))
             .args(&args)
             .status()
             .expect("génération du MKV de test");
@@ -823,6 +823,16 @@ mod tests {
         ];
         if !elements_present(&needed) {
             eprintln!("check_clip_window : éléments GStreamer absents, test sauté");
+            return;
+        }
+        // gst-launch (génération du MKV de test) doit être exécutable — sur
+        // certains CI il n'est pas dans le PATH ; on saute alors proprement.
+        let runnable = std::process::Command::new(crate::recorder::gst_tool("gst-launch-1.0"))
+            .arg("--version")
+            .output()
+            .is_ok_and(|o| o.status.success());
+        if !runnable {
+            eprintln!("check_clip_window : gst-launch-1.0 indisponible, test sauté");
             return;
         }
 
