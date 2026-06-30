@@ -410,7 +410,13 @@ fn build_clip_pipelines(
         .property("location", input.to_string_lossy().as_ref())
         .build()
         .context("élément filesrc")?;
+    // force-sw-decoders : on évite les décodeurs matériels (D3D11 sous Windows,
+    // VA/CUDA sous Linux) qui sortent de la mémoire GPU, incompatible avec le
+    // `videoconvert` (mémoire système) en aval → sinon « not-negotiated » et le
+    // pipeline échoue à passer en PAUSED. Le décodage logiciel reste rapide,
+    // borné à la fenêtre par le seek.
     let decodebin = gst::ElementFactory::make("decodebin")
+        .property("force-sw-decoders", true)
         .build()
         .context("élément decodebin")?;
     decode
@@ -505,9 +511,12 @@ fn run_clip(
     });
 
     // Préroll du décodage : pads découverts et ponts construits.
-    decode
-        .set_state(gst::State::Paused)
-        .context("décodage → PAUSED")?;
+    if decode.set_state(gst::State::Paused).is_err() {
+        let detail = drain_error(&decode).unwrap_or_else(|| "passage à PAUSED échoué".to_owned());
+        let _ = decode.set_state(gst::State::Null);
+        let _ = mux.set_state(gst::State::Null);
+        bail!("décodage → PAUSED : {detail}");
+    }
     let (res, _, _) = decode.state(PREROLL_TIMEOUT);
     if res.is_err() {
         let detail = drain_error(&decode)
