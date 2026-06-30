@@ -70,19 +70,28 @@ jobs:
             } else { Write-Host "$msi (cache)" }
             Start-Process msiexec.exe -ArgumentList "/i `"$dest`" /quiet ADDLOCAL=ALL" -Wait -NoNewWindow
           }
-          $root = "C:\gstreamer\1.0\msvc_x86_64"
-          # pkgconf (séparateur ';' natif Windows) via MSYS2 préinstallé :
-          # pkgconfiglite couperait PKG_CONFIG_PATH sur le ':' de 'C:', et
-          # GStreamer ne livre pas de pkg-config.
+          # Localise les .pc réellement installés (le chemin d'install n'est
+          # pas garanti). Dump de l'arbre si introuvable, pour diagnostiquer.
+          $pcfile = Get-ChildItem -Path "C:\gstreamer" -Recurse -Filter "gstreamer-1.0.pc" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $pcfile) {
+            Write-Host "=== arborescence C:\gstreamer ==="
+            Get-ChildItem -Path "C:\gstreamer" -Recurse -Depth 3 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName
+            throw "gstreamer-1.0.pc introuvable apres installation"
+          }
+          $pkgdir = $pcfile.Directory.FullName
+          $root = $pcfile.Directory.Parent.Parent.FullName
+          Write-Host "GStreamer root=$root  pkgconfig=$pkgdir"
+          # pkgconf (séparateur ';' natif Windows) via MSYS2 : pkgconfiglite
+          # couperait PKG_CONFIG_PATH sur le ':' de 'C:', et GStreamer n'a pas
+          # de pkg-config.
           C:\msys64\usr\bin\pacman.exe -Sy --noconfirm --needed mingw-w64-x86_64-pkgconf
           $pc = "C:\msys64\mingw64\bin\pkgconf.exe"
-          Write-Host "pkgconf=$(Test-Path $pc)  glib-2.0.pc=$(Test-Path "$root\lib\pkgconfig\glib-2.0.pc")  gstreamer-1.0.pc=$(Test-Path "$root\lib\pkgconfig\gstreamer-1.0.pc")"
           if (-not (Test-Path $pc)) { throw "pkgconf introuvable après pacman" }
-          $env:PKG_CONFIG_PATH = "$root\lib\pkgconfig"
+          $env:PKG_CONFIG_PATH = $pkgdir
           & $pc --modversion glib-2.0 gstreamer-1.0
           if ($LASTEXITCODE -ne 0) { throw "pkgconf ne résout pas glib-2.0/gstreamer-1.0" }
           "PKG_CONFIG=$pc" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          "PKG_CONFIG_PATH=$root\lib\pkgconfig" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "PKG_CONFIG_PATH=$pkgdir" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           "GSTREAMER_1_0_ROOT_MSVC_X86_64=$root\" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           "$root\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
 
