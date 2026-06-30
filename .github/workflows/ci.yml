@@ -84,14 +84,28 @@ jobs:
               }
               if (-not $ok) { throw "échec du téléchargement : $msi" }
             } else { Write-Host "$msi (cache)" }
-            Start-Process msiexec.exe -ArgumentList "/i `"$dest`" /quiet ADDLOCAL=ALL" -Wait -NoNewWindow
+            $mp = Start-Process msiexec.exe -ArgumentList @("/i", $dest, "/quiet", "/norestart", "ADDLOCAL=ALL") -Wait -PassThru -NoNewWindow
+            Write-Host "  msiexec $msi exit=$($mp.ExitCode)"
+            if ($mp.ExitCode -ne 0 -and $mp.ExitCode -ne 3010) { throw "msiexec a echoue ($($mp.ExitCode)) : $msi" }
           }
-          # Localise les .pc réellement installés (le chemin d'install n'est
-          # pas garanti). Dump de l'arbre si introuvable, pour diagnostiquer.
-          $pcfile = Get-ChildItem -Path "C:\gstreamer" -Recurse -Filter "gstreamer-1.0.pc" -ErrorAction SilentlyContinue | Select-Object -First 1
+          # Localise gstreamer-1.0.pc, le chemin d'install n'etant pas garanti
+          # (emplacements probables, sinon recherche large + registre).
+          $cands = @("C:\gstreamer", "$env:ProgramFiles\gstreamer", "$env:SystemDrive\gstreamer")
+          $pcfile = $null
+          foreach ($c in $cands) {
+            if (Test-Path $c) {
+              $pcfile = Get-ChildItem -Path $c -Recurse -Filter "gstreamer-1.0.pc" -ErrorAction SilentlyContinue | Select-Object -First 1
+              if ($pcfile) { break }
+            }
+          }
           if (-not $pcfile) {
-            Write-Host "=== arborescence C:\gstreamer ==="
-            Get-ChildItem -Path "C:\gstreamer" -Recurse -Depth 3 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName
+            $pcfile = Get-ChildItem -Path "C:\" -Recurse -Filter "gstreamer-1.0.pc" -ErrorAction SilentlyContinue | Select-Object -First 1
+          }
+          if (-not $pcfile) {
+            Write-Host "=== GSTREAMER_* dans le registre ==="
+            Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Environment" -ErrorAction SilentlyContinue | Format-List GSTREAMER*
+            Write-Host "=== contenu C:\gstreamer ==="
+            Get-ChildItem -Path "C:\gstreamer" -Recurse -Depth 2 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName
             throw "gstreamer-1.0.pc introuvable apres installation"
           }
           $pkgdir = $pcfile.Directory.FullName
