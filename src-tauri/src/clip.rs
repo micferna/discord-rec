@@ -462,6 +462,7 @@ fn run_clip(
     stop: gst::ClockTime,
     target_height: Option<u32>,
     encoder: VideoEncoder,
+    no_seek: bool,
 ) -> Result<()> {
     gst::init().context("initialisation de GStreamer")?;
 
@@ -546,14 +547,18 @@ fn run_clip(
     // échoue, la probe de fenêtrage prend le relais (décodage depuis 0).
     mux.set_state(gst::State::Playing)
         .context("muxage → PLAYING")?;
-    let _ = decodebin.seek(
-        1.0,
-        gst::SeekFlags::FLUSH | gst::SeekFlags::ACCURATE,
-        gst::SeekType::Set,
-        start,
-        gst::SeekType::Set,
-        stop,
-    );
+    // `no_seek` force le chemin « probe seule » (comme un fichier en cours sans
+    // index où le seek échoue) : sert à valider ce repli en test.
+    if !no_seek {
+        let _ = decodebin.seek(
+            1.0,
+            gst::SeekFlags::FLUSH | gst::SeekFlags::ACCURATE,
+            gst::SeekType::Set,
+            start,
+            gst::SeekType::Set,
+            stop,
+        );
+    }
     decode
         .set_state(gst::State::Playing)
         .context("décodage → PLAYING")?;
@@ -675,13 +680,16 @@ fn drain_error(pipeline: &gst::Pipeline) -> Option<String> {
 
 /// Découpe `input_name` (du dossier `output_dir`) sur `[start_s, start_s +
 /// duration_s]` et écrit un MP4 dans le même dossier. Renvoie le nom du MP4
-/// produit. `target_height = None` garde la résolution source.
+/// produit. `target_height = None` garde la résolution source. `no_seek` force
+/// le fenêtrage par probe (sans seek) : requis pour un fichier en cours
+/// d'écriture (clip live), dont le seek n'est pas fiable.
 pub async fn clip(
     output_dir: &Path,
     input_name: &str,
     start_s: f64,
     duration_s: f64,
     target_height: Option<u32>,
+    no_seek: bool,
 ) -> Result<String> {
     let input = output_dir.join(input_name);
     if !input.is_file() {
@@ -714,7 +722,15 @@ pub async fn clip(
     let encoder = recorder::detect_encoder().await;
 
     tokio::task::spawn_blocking(move || {
-        run_clip(&input, &output, start, stop, target_height, encoder)
+        run_clip(
+            &input,
+            &output,
+            start,
+            stop,
+            target_height,
+            encoder,
+            no_seek,
+        )
     })
     .await
     .context("tâche de coupe interrompue")??;
@@ -822,7 +838,7 @@ mod tests {
     /// Coupe réelle d'un MKV à `audio_tracks` pistes : extrait [8 s, 13 s] et
     /// vérifie que le MP4 produit dure ~5 s — preuve que le découplage
     /// décodage/muxage coupe au bon endroit ET que qtmux finalise.
-    fn check_clip_window(audio_tracks: u32) {
+    fn check_clip_window(audio_tracks: u32, no_seek: bool) {
         let needed = [
             "videotestsrc",
             "audiotestsrc",
@@ -852,7 +868,7 @@ mod tests {
         }
 
         let dir = std::env::temp_dir().join(format!(
-            "disc-rec-cliptest-{}-{audio_tracks}",
+            "disc-rec-cliptest-{}-{audio_tracks}-{no_seek}",
             std::process::id()
         ));
         std::fs::create_dir_all(&dir).expect("dossier de test");
@@ -870,6 +886,7 @@ mod tests {
             gst::ClockTime::from_seconds(13),
             None,
             best_encoder(),
+            no_seek,
         )
         .expect("coupe du clip");
 
@@ -877,21 +894,28 @@ mod tests {
         let dur = media_duration_secs(&out).expect("durée du clip");
         assert!(
             (4.0..=6.5).contains(&dur),
-            "clip attendu ~5 s, obtenu {dur:.2} s ({audio_tracks} pistes audio)"
+            "clip attendu ~5 s, obtenu {dur:.2} s (no_seek={no_seek}, {audio_tracks} pistes)"
         );
 
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// Mode mixé : une seule piste audio.
+    /// Mode mixé : une seule piste audio (chemin avec seek).
     #[test]
     fn clip_extracts_window_single_audio() {
-        check_clip_window(1);
+        check_clip_window(1, false);
+    }
+
+    /// Chemin « probe seule » (sans seek), comme le clip live sur un fichier en
+    /// cours sans index : le fenêtrage doit tenir aussi.
+    #[test]
+    fn clip_extracts_window_probe_only() {
+        check_clip_window(1, true);
     }
 
     /// Mode séparé : deux pistes audio (Discord + micro) → deux pads qtmux.
     #[test]
     fn clip_extracts_window_two_audio() {
-        check_clip_window(2);
+        check_clip_window(2, false);
     }
 }

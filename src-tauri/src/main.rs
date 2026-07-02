@@ -194,6 +194,37 @@ fn open_recordings_dir(shared: SharedState) -> Result<(), String> {
     open_with_system(dir.as_os_str())
 }
 
+/// Ouvre un enregistrement/clip avec le lecteur par défaut du système.
+#[tauri::command]
+fn open_recording(shared: SharedState, name: String) -> Result<(), String> {
+    if !valid_media_name(&name) {
+        return Err("fichier invalide".into());
+    }
+    let path = shared.config_snapshot().output_dir.join(&name);
+    if !path.is_file() {
+        return Err("fichier introuvable".into());
+    }
+    open_with_system(path.as_os_str())
+}
+
+/// Supprime un enregistrement/clip du dossier de sortie. Refuse de supprimer
+/// l'enregistrement en cours.
+#[tauri::command]
+fn delete_recording(shared: SharedState, name: String) -> Result<(), String> {
+    if !valid_media_name(&name) {
+        return Err("fichier invalide".into());
+    }
+    // Ne pas supprimer le fichier en cours d'écriture.
+    let current = shared.status.lock().expect("mutex status").file.clone();
+    if let Some(cur) = current {
+        if std::path::Path::new(&cur).file_name() == Some(std::ffi::OsStr::new(&name)) {
+            return Err("enregistrement en cours — arrête-le avant de le supprimer".into());
+        }
+    }
+    let path = shared.config_snapshot().output_dir.join(&name);
+    std::fs::remove_file(&path).map_err(|e| format!("suppression : {e}"))
+}
+
 /// Convertit un enregistrement MKV en MP4 (audio AAC, lisible partout).
 /// `height = None` garde la résolution source (copie vidéo sans perte) ;
 /// sinon réduit jusqu'à cette hauteur. Renvoie le nom du MP4 produit.
@@ -247,7 +278,8 @@ async fn clip_range(
         return Err("fichier à découper invalide".into());
     }
     let dir = shared.config_snapshot().output_dir;
-    clip::clip(&dir, &name, start_s, duration_s, height)
+    // Fichier terminé (montage) : le seek est fiable → fenêtrage rapide.
+    clip::clip(&dir, &name, start_s, duration_s, height, false)
         .await
         .map_err(|e| format!("{e:#}"))
 }
@@ -297,7 +329,9 @@ async fn clip_live(shared: SharedState<'_>, minutes: f64) -> Result<String, Stri
             "enregistrement trop court pour ce clip (réessaie dans quelques secondes)".into(),
         );
     }
-    clip::clip(&dir, &name, start_s, duration_s, None)
+    // Fichier EN COURS d'écriture : le seek n'est pas fiable (pas d'index, et
+    // il se comporte mal sous Windows) → fenêtrage par probe uniquement.
+    clip::clip(&dir, &name, start_s, duration_s, None, true)
         .await
         .map_err(|e| format!("{e:#}"))
 }
@@ -431,6 +465,8 @@ fn main() {
             clip_range,
             clip_live,
             media_duration,
+            open_recording,
+            delete_recording,
             open_recordings_dir,
             quit_app,
             updates::check_update,
