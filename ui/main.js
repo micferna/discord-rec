@@ -369,6 +369,55 @@ function buildClipControls(f) {
   return { toggle, panel };
 }
 
+// Boutons « ouvrir » (lecteur système) et « supprimer » (2 clics) par fichier.
+function buildFileActions(f) {
+  const open = document.createElement("button");
+  open.type = "button";
+  open.className = "btn btn-small tape-open";
+  open.textContent = "▶";
+  open.title = "Ouvrir avec le lecteur";
+  open.addEventListener("click", async () => {
+    try {
+      await invoke("open_recording", { name: f.name });
+    } catch (err) {
+      showRecError(`ouverture : ${err}`);
+    }
+  });
+
+  const del = document.createElement("button");
+  del.type = "button";
+  del.className = "btn btn-small tape-del";
+  del.textContent = "🗑";
+  del.title = "Supprimer le fichier";
+  let armed = false;
+  let timer = null;
+  const reset = () => {
+    armed = false;
+    del.classList.remove("armed");
+    del.textContent = "🗑";
+    if (timer) clearTimeout(timer);
+  };
+  del.addEventListener("click", async () => {
+    if (!armed) {
+      // 1er clic : on arme (confirmation) pour éviter les suppressions accidentelles.
+      armed = true;
+      del.classList.add("armed");
+      del.textContent = "Supprimer ?";
+      timer = setTimeout(reset, 3000);
+      return;
+    }
+    reset();
+    try {
+      await invoke("delete_recording", { name: f.name });
+      refreshRecordings();
+    } catch (err) {
+      showRecError(`suppression : ${err}`);
+    }
+  });
+
+  return [open, del];
+}
+
 async function refreshRecordings() {
   const files = await invoke("list_recordings");
   const ul = $("recordings");
@@ -397,6 +446,7 @@ async function refreshRecordings() {
     // Montage : découpe un extrait de n'importe quel enregistrement (mkv/mp4).
     const { toggle, panel } = buildClipControls(f);
     actions.appendChild(toggle);
+    actions.append(...buildFileActions(f));
     li.append(name, actions, panel);
     ul.appendChild(li);
   }

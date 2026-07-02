@@ -27,9 +27,10 @@
 //! en filet de sécurité si le seek échoue (fichier en cours sans index) :
 //! décodage depuis 0, drop hors fenêtre, EOS franc à `stop`.
 //!
-//! Linux d'abord : ce module est gaté `cfg(unix)` et les crates `gstreamer` /
-//! `gstreamer-app` sont des dépendances Unix uniquement (build Windows
-//! inchangé).
+//! Cross-plateforme (Linux + Windows). Sous Windows, les DLL `GStreamer` liées
+//! par le crate sont chargées en *delay-load* (cf. `build.rs`) et le dossier
+//! `bin` de `GStreamer` est ajouté au PATH au démarrage (`add_gstreamer_dll_dir`
+//! dans `main.rs`), car l'installeur officiel ne l'y met pas.
 
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -91,6 +92,24 @@ fn make_video_encoder(encoder: VideoEncoder, bitrate_kbps: u32) -> Result<gst::E
                 ("key-int-max", "120".into()),
             ],
         ),
+        #[cfg(windows)]
+        VideoEncoder::Qsv => (
+            "qsvh264enc",
+            vec![
+                ("bitrate", bitrate_kbps.to_string()),
+                ("gop-size", "120".into()),
+            ],
+        ),
+        #[cfg(windows)]
+        VideoEncoder::Amf => (
+            "amfh264enc",
+            vec![
+                ("bitrate", bitrate_kbps.to_string()),
+                ("gop-size", "120".into()),
+            ],
+        ),
+        #[cfg(windows)]
+        VideoEncoder::MediaFoundation => ("mfh264enc", vec![("bitrate", bitrate_kbps.to_string())]),
         VideoEncoder::X264 => (
             "x264enc",
             vec![
@@ -391,7 +410,13 @@ fn build_clip_pipelines(
         .property("location", input.to_string_lossy().as_ref())
         .build()
         .context("élément filesrc")?;
+    // force-sw-decoders : on évite les décodeurs matériels (D3D11 sous Windows,
+    // VA/CUDA sous Linux) qui sortent de la mémoire GPU, incompatible avec le
+    // `videoconvert` (mémoire système) en aval → sinon « not-negotiated » et le
+    // pipeline échoue à passer en PAUSED. Le décodage logiciel reste rapide,
+    // borné à la fenêtre par le seek.
     let decodebin = gst::ElementFactory::make("decodebin")
+        .property("force-sw-decoders", true)
         .build()
         .context("élément decodebin")?;
     decode
@@ -437,6 +462,7 @@ fn run_clip(
     stop: gst::ClockTime,
     target_height: Option<u32>,
     encoder: VideoEncoder,
+    no_seek: bool,
 ) -> Result<()> {
     gst::init().context("initialisation de GStreamer")?;
 
@@ -486,9 +512,12 @@ fn run_clip(
     });
 
     // Préroll du décodage : pads découverts et ponts construits.
-    decode
-        .set_state(gst::State::Paused)
-        .context("décodage → PAUSED")?;
+    if decode.set_state(gst::State::Paused).is_err() {
+        let detail = drain_error(&decode).unwrap_or_else(|| "passage à PAUSED échoué".to_owned());
+        let _ = decode.set_state(gst::State::Null);
+        let _ = mux.set_state(gst::State::Null);
+        bail!("décodage → PAUSED : {detail}");
+    }
     let (res, _, _) = decode.state(PREROLL_TIMEOUT);
     if res.is_err() {
         let detail = drain_error(&decode)
@@ -518,14 +547,18 @@ fn run_clip(
     // échoue, la probe de fenêtrage prend le relais (décodage depuis 0).
     mux.set_state(gst::State::Playing)
         .context("muxage → PLAYING")?;
-    let _ = decodebin.seek(
-        1.0,
-        gst::SeekFlags::FLUSH | gst::SeekFlags::ACCURATE,
-        gst::SeekType::Set,
-        start,
-        gst::SeekType::Set,
-        stop,
-    );
+    // `no_seek` force le chemin « probe seule » (comme un fichier en cours sans
+    // index où le seek échoue) : sert à valider ce repli en test.
+    if !no_seek {
+        let _ = decodebin.seek(
+            1.0,
+            gst::SeekFlags::FLUSH | gst::SeekFlags::ACCURATE,
+            gst::SeekType::Set,
+            start,
+            gst::SeekType::Set,
+            stop,
+        );
+    }
     decode
         .set_state(gst::State::Playing)
         .context("décodage → PLAYING")?;
@@ -647,13 +680,16 @@ fn drain_error(pipeline: &gst::Pipeline) -> Option<String> {
 
 /// Découpe `input_name` (du dossier `output_dir`) sur `[start_s, start_s +
 /// duration_s]` et écrit un MP4 dans le même dossier. Renvoie le nom du MP4
-/// produit. `target_height = None` garde la résolution source.
+/// produit. `target_height = None` garde la résolution source. `no_seek` force
+/// le fenêtrage par probe (sans seek) : requis pour un fichier en cours
+/// d'écriture (clip live), dont le seek n'est pas fiable.
 pub async fn clip(
     output_dir: &Path,
     input_name: &str,
     start_s: f64,
     duration_s: f64,
     target_height: Option<u32>,
+    no_seek: bool,
 ) -> Result<String> {
     let input = output_dir.join(input_name);
     if !input.is_file() {
@@ -686,7 +722,15 @@ pub async fn clip(
     let encoder = recorder::detect_encoder().await;
 
     tokio::task::spawn_blocking(move || {
-        run_clip(&input, &output, start, stop, target_height, encoder)
+        run_clip(
+            &input,
+            &output,
+            start,
+            stop,
+            target_height,
+            encoder,
+            no_seek,
+        )
     })
     .await
     .context("tâche de coupe interrompue")??;
@@ -763,7 +807,13 @@ mod tests {
         .iter()
         .map(|s| (*s).to_owned())
         .collect();
-        args.push(format!("location={}", src.display()));
+        // Slashes avant : la syntaxe de gst-launch traite '\' comme un
+        // échappement, donc un chemin Windows en backslashes serait mal
+        // interprété (le MKV irait ailleurs). gstreamer accepte les '/'.
+        args.push(format!(
+            "location={}",
+            src.display().to_string().replace('\\', "/")
+        ));
         for _ in 0..audio_tracks {
             for token in [
                 "audiotestsrc",
@@ -778,7 +828,7 @@ mod tests {
                 args.push(token.to_owned());
             }
         }
-        let status = std::process::Command::new("gst-launch-1.0")
+        let status = std::process::Command::new(crate::recorder::gst_tool("gst-launch-1.0"))
             .args(&args)
             .status()
             .expect("génération du MKV de test");
@@ -788,7 +838,7 @@ mod tests {
     /// Coupe réelle d'un MKV à `audio_tracks` pistes : extrait [8 s, 13 s] et
     /// vérifie que le MP4 produit dure ~5 s — preuve que le découplage
     /// décodage/muxage coupe au bon endroit ET que qtmux finalise.
-    fn check_clip_window(audio_tracks: u32) {
+    fn check_clip_window(audio_tracks: u32, no_seek: bool) {
         let needed = [
             "videotestsrc",
             "audiotestsrc",
@@ -806,9 +856,19 @@ mod tests {
             eprintln!("check_clip_window : éléments GStreamer absents, test sauté");
             return;
         }
+        // gst-launch (génération du MKV de test) doit être exécutable — sur
+        // certains CI il n'est pas dans le PATH ; on saute alors proprement.
+        let runnable = std::process::Command::new(crate::recorder::gst_tool("gst-launch-1.0"))
+            .arg("--version")
+            .output()
+            .is_ok_and(|o| o.status.success());
+        if !runnable {
+            eprintln!("check_clip_window : gst-launch-1.0 indisponible, test sauté");
+            return;
+        }
 
         let dir = std::env::temp_dir().join(format!(
-            "disc-rec-cliptest-{}-{audio_tracks}",
+            "disc-rec-cliptest-{}-{audio_tracks}-{no_seek}",
             std::process::id()
         ));
         std::fs::create_dir_all(&dir).expect("dossier de test");
@@ -826,6 +886,7 @@ mod tests {
             gst::ClockTime::from_seconds(13),
             None,
             best_encoder(),
+            no_seek,
         )
         .expect("coupe du clip");
 
@@ -833,21 +894,28 @@ mod tests {
         let dur = media_duration_secs(&out).expect("durée du clip");
         assert!(
             (4.0..=6.5).contains(&dur),
-            "clip attendu ~5 s, obtenu {dur:.2} s ({audio_tracks} pistes audio)"
+            "clip attendu ~5 s, obtenu {dur:.2} s (no_seek={no_seek}, {audio_tracks} pistes)"
         );
 
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// Mode mixé : une seule piste audio.
+    /// Mode mixé : une seule piste audio (chemin avec seek).
     #[test]
     fn clip_extracts_window_single_audio() {
-        check_clip_window(1);
+        check_clip_window(1, false);
+    }
+
+    /// Chemin « probe seule » (sans seek), comme le clip live sur un fichier en
+    /// cours sans index : le fenêtrage doit tenir aussi.
+    #[test]
+    fn clip_extracts_window_probe_only() {
+        check_clip_window(1, true);
     }
 
     /// Mode séparé : deux pistes audio (Discord + micro) → deux pads qtmux.
     #[test]
     fn clip_extracts_window_two_audio() {
-        check_clip_window(2);
+        check_clip_window(2, false);
     }
 }

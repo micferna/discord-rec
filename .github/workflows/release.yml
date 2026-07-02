@@ -41,6 +41,74 @@ jobs:
             librsvg2-dev libjavascriptcoregtk-4.1-dev libayatana-appindicator3-dev \
             libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
 
+      # Dev-kit GStreamer MSVC + pkg-config pour lier le crate gstreamer
+      # (montage/clip) sous Windows. MSI en cache (serveur freedesktop instable).
+      - name: Cache GStreamer MSIs
+        if: runner.os == 'Windows'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}\gst-msi
+          key: gst-msi-1.26.11
+      - name: GStreamer (dev + runtime, MSVC)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ver = "1.26.11"
+          $dir = "$env:RUNNER_TEMP\gst-msi"
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          $base = "https://gstreamer.freedesktop.org/data/pkg/windows/$ver/msvc"
+          foreach ($msi in @("gstreamer-1.0-msvc-x86_64-$ver.msi", "gstreamer-1.0-devel-msvc-x86_64-$ver.msi")) {
+            $dest = "$dir\$msi"
+            if (-not (Test-Path $dest)) {
+              Write-Host "Downloading $msi"
+              $ok = $false
+              for ($i = 1; $i -le 12 -and -not $ok; $i++) {
+                curl.exe -L --fail -C - --connect-timeout 30 --max-time 600 -o $dest "$base/$msi"
+                if ($LASTEXITCODE -eq 0) { $ok = $true } else { Write-Host "reprise $i"; Start-Sleep 10 }
+              }
+              if (-not $ok) { throw "échec du téléchargement : $msi" }
+            } else { Write-Host "$msi (cache)" }
+            $mp = Start-Process msiexec.exe -ArgumentList @("/i", $dest, "/quiet", "/norestart", "ADDLOCAL=ALL") -Wait -PassThru -NoNewWindow
+            Write-Host "  msiexec $msi exit=$($mp.ExitCode)"
+            if ($mp.ExitCode -ne 0 -and $mp.ExitCode -ne 3010) { throw "msiexec a echoue ($($mp.ExitCode)) : $msi" }
+          }
+          # Localise gstreamer-1.0.pc, le chemin d'install n'etant pas garanti
+          # (emplacements probables, sinon recherche large + registre).
+          $cands = @("C:\gstreamer", "$env:ProgramFiles\gstreamer", "$env:SystemDrive\gstreamer")
+          $pcfile = $null
+          foreach ($c in $cands) {
+            if (Test-Path $c) {
+              $pcfile = Get-ChildItem -Path $c -Recurse -Filter "gstreamer-1.0.pc" -ErrorAction SilentlyContinue | Select-Object -First 1
+              if ($pcfile) { break }
+            }
+          }
+          if (-not $pcfile) {
+            $pcfile = Get-ChildItem -Path "C:\" -Recurse -Filter "gstreamer-1.0.pc" -ErrorAction SilentlyContinue | Select-Object -First 1
+          }
+          if (-not $pcfile) {
+            Write-Host "=== GSTREAMER_* dans le registre ==="
+            Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Environment" -ErrorAction SilentlyContinue | Format-List GSTREAMER*
+            Write-Host "=== contenu C:\gstreamer ==="
+            Get-ChildItem -Path "C:\gstreamer" -Recurse -Depth 2 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName
+            throw "gstreamer-1.0.pc introuvable apres installation"
+          }
+          $pkgdir = $pcfile.Directory.FullName
+          $root = $pcfile.Directory.Parent.Parent.FullName
+          Write-Host "GStreamer root=$root  pkgconfig=$pkgdir"
+          # pkgconf (séparateur ';' natif Windows) via MSYS2 : pkgconfiglite
+          # couperait PKG_CONFIG_PATH sur le ':' de 'C:', et GStreamer n'a pas
+          # de pkg-config.
+          C:\msys64\usr\bin\pacman.exe -Sy --noconfirm --needed mingw-w64-x86_64-pkgconf
+          $pc = "C:\msys64\mingw64\bin\pkgconf.exe"
+          if (-not (Test-Path $pc)) { throw "pkgconf introuvable après pacman" }
+          $env:PKG_CONFIG_PATH = $pkgdir
+          & $pc --modversion glib-2.0 gstreamer-1.0
+          if ($LASTEXITCODE -ne 0) { throw "pkgconf ne résout pas glib-2.0/gstreamer-1.0" }
+          "PKG_CONFIG=$pc" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "PKG_CONFIG_PATH=$pkgdir" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "GSTREAMER_1_0_ROOT_MSVC_X86_64=$root\" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "$root\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
           toolchain: stable
