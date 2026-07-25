@@ -30,8 +30,8 @@ tauri-plugin-updater = "2.10.1"
 # Cross-plateforme : sous Windows, les DLL sont chargées en delay-load (cf.
 # build.rs + add_gstreamer_dll_dir dans main.rs), l'installeur GStreamer ne les
 # mettant pas dans le PATH.
-gstreamer = "0.23"
-gstreamer-app = "0.23"
+gstreamer = "0.25"
+gstreamer-app = "0.25"
 
 [target.'cfg(unix)'.dependencies]
 ashpd = { version = "0.13", default-features = false, features = ["tokio", "screencast"] }
