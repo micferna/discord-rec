@@ -20,9 +20,10 @@ mod winproc;
 #[cfg(unix)]
 mod x11;
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::UNIX_EPOCH;
 
 use serde::{Deserialize, Serialize};
@@ -46,6 +47,10 @@ struct UiConfig {
     mix_audio: bool,
     mic_denoise: bool,
     keep_only_last: bool,
+    auto_mp4: bool,
+    retention_days: u32,
+    retention_max_gb: u32,
+    clip_after_s: u32,
 }
 
 #[derive(Serialize)]
@@ -72,6 +77,14 @@ fn set_enabled(shared: SharedState, enabled: bool) {
     let _ = config::save(&cfg);
 }
 
+/// Force (ou arrête) un enregistrement manuel, indépendamment de la détection
+/// vocale : utile pour capturer un partage d'écran hors salon. Transitoire —
+/// non persisté (au redémarrage, l'app repart en mode AUTO seul).
+#[tauri::command]
+fn set_force_recording(shared: SharedState, on: bool) {
+    shared.force.store(on, Ordering::Relaxed);
+}
+
 #[tauri::command]
 fn get_config(shared: SharedState) -> UiConfig {
     let cfg = shared.config_snapshot();
@@ -86,6 +99,10 @@ fn get_config(shared: SharedState) -> UiConfig {
         mix_audio: cfg.mix_audio,
         mic_denoise: cfg.mic_denoise,
         keep_only_last: cfg.keep_only_last,
+        auto_mp4: cfg.auto_mp4,
+        retention_days: cfg.retention_days,
+        retention_max_gb: cfg.retention_max_gb,
+        clip_after_s: cfg.clip_after_s,
     }
 }
 
@@ -105,6 +122,10 @@ fn set_config(shared: SharedState, ui: UiConfig) -> Result<(), String> {
     cfg.mix_audio = ui.mix_audio;
     cfg.mic_denoise = ui.mic_denoise;
     cfg.keep_only_last = ui.keep_only_last;
+    cfg.auto_mp4 = ui.auto_mp4;
+    cfg.retention_days = ui.retention_days;
+    cfg.retention_max_gb = ui.retention_max_gb;
+    cfg.clip_after_s = ui.clip_after_s;
     cfg.sanitize();
     config::save(&cfg).map_err(|e| format!("{e:#}"))
 }
@@ -234,10 +255,9 @@ async fn convert_recording(
     name: String,
     height: Option<u32>,
 ) -> Result<String, String> {
-    // Le nom doit rester un simple fichier du dossier de sortie.
-    if name.is_empty()
-        || name.contains('/')
-        || name.contains('\\')
+    // Le nom doit rester un simple fichier MKV sûr du dossier de sortie
+    // (`is_safe_file_name` bloque l'injection de pipeline via nom hostile).
+    if !is_safe_file_name(&name)
         || std::path::Path::new(&name)
             .extension()
             .is_none_or(|e| !e.eq_ignore_ascii_case("mkv"))
@@ -254,11 +274,26 @@ async fn convert_recording(
 /// cours d'écriture peut être incomplet, on s'arrête un peu avant.
 const LIVE_CLIP_MARGIN_S: f64 = 3.0;
 
-/// Vérifie qu'un nom désigne un simple fichier (mkv/mp4) du dossier de sortie.
-fn valid_media_name(name: &str) -> bool {
+/// Vérifie qu'un nom désigne un simple fichier du dossier de sortie, sans
+/// séparateur de chemin **ni caractère de contrôle**.
+///
+/// Le rejet des caractères de contrôle (tabulation, saut de ligne, retour
+/// chariot…) ferme une injection de pipeline : `convert::to_mp4` passe le nom à
+/// `gst-launch-1.0` sous la forme `location=<nom>`, et `gst_parse_launchv`
+/// re-parse ses arguments en n'échappant QUE l'espace. Une tabulation dans le
+/// nom serait donc interprétée comme de la syntaxe `GStreamer` (`… ! filesink
+/// location=…`), permettant d'instancier des éléments arbitraires. L'espace,
+/// lui, est échappé par gst et reste sûr.
+fn is_safe_file_name(name: &str) -> bool {
     !name.is_empty()
         && !name.contains('/')
         && !name.contains('\\')
+        && !name.chars().any(char::is_control)
+}
+
+/// Vérifie qu'un nom désigne un simple fichier (mkv/mp4) sûr du dossier de sortie.
+fn valid_media_name(name: &str) -> bool {
+    is_safe_file_name(name)
         && std::path::Path::new(name)
             .extension()
             .is_some_and(|e| e.eq_ignore_ascii_case("mkv") || e.eq_ignore_ascii_case("mp4"))
@@ -312,17 +347,24 @@ async fn clip_live(shared: SharedState<'_>, minutes: f64) -> Result<String, Stri
         .ok_or("nom de l'enregistrement en cours illisible")?
         .to_owned();
 
-    let now_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .ok()
-        .and_then(|d| u64::try_from(d.as_millis()).ok())
-        .unwrap_or(started_at_ms);
-    // Écoulé en ms (< 2^53) : conversion exacte en secondes flottantes.
-    #[allow(clippy::cast_precision_loss)]
-    let elapsed_s = now_ms.saturating_sub(started_at_ms) as f64 / 1000.0;
+    // Secondes capturées APRÈS le clic (réglage) : on attend ce délai pour que
+    // l'enregistrement en cours écrive la suite, puis on l'inclut dans la
+    // fenêtre. `0` = clip jusqu'au bord live actuel (comportement d'origine).
+    // La marge live reste retranchée : l'« après » effectif vaut `après − marge`.
+    let after_s = f64::from(shared.config_snapshot().clip_after_s);
+
+    // Début de fenêtre ancré à l'instant du clic ; la fin suivra le bord live
+    // (après l'éventuelle marge « après »).
+    let press_ms = now_unix_ms().unwrap_or(started_at_ms);
+    let start_s = (elapsed_secs(started_at_ms, press_ms) - minutes * 60.0).max(0.0);
+
+    if after_s > 0.0 {
+        tokio::time::sleep(std::time::Duration::from_secs_f64(after_s)).await;
+    }
+
     // On vise jusqu'à un peu avant le bord live (cluster en cours).
-    let stop_s = (elapsed_s - LIVE_CLIP_MARGIN_S).max(0.0);
-    let start_s = (stop_s - minutes * 60.0).max(0.0);
+    let edge_ms = now_unix_ms().unwrap_or(press_ms);
+    let stop_s = (elapsed_secs(started_at_ms, edge_ms) - LIVE_CLIP_MARGIN_S).max(0.0);
     let duration_s = stop_s - start_s;
     if duration_s < 1.0 {
         return Err(
@@ -334,6 +376,87 @@ async fn clip_live(shared: SharedState<'_>, minutes: f64) -> Result<String, Stri
     clip::clip(&dir, &name, start_s, duration_s, None, true)
         .await
         .map_err(|e| format!("{e:#}"))
+}
+
+/// Millisecondes epoch actuelles (`None` si l'horloge est avant l'epoch).
+fn now_unix_ms() -> Option<u64> {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .and_then(|d| u64::try_from(d.as_millis()).ok())
+}
+
+/// Écoulé (secondes) entre `started_at_ms` et `at_ms` (ms epoch). Durée média
+/// `< 2^53` ms → conversion exacte en flottant.
+#[allow(clippy::cast_precision_loss)]
+fn elapsed_secs(started_at_ms: u64, at_ms: u64) -> f64 {
+    at_ms.saturating_sub(started_at_ms) as f64 / 1000.0
+}
+
+/// Durée + résolution renvoyées à l'interface pour enrichir la liste.
+#[derive(Clone, Copy, Serialize)]
+struct ProbeInfo {
+    duration_s: f64,
+    width: Option<u32>,
+    height: Option<u32>,
+}
+
+/// Entrée de cache : la sonde, valide tant que taille ET mtime sont inchangés.
+struct CachedProbe {
+    size: u64,
+    mtime_ms: u64,
+    info: ProbeInfo,
+}
+
+/// Cache mémoire des sondes (durée/résolution), pour ne prérouler chaque fichier
+/// qu'une fois. Les enregistrements finalisés sont immuables ; l'invalidation par
+/// taille+mtime couvre le cas d'un fichier remplacé.
+fn probe_cache() -> &'static Mutex<HashMap<String, CachedProbe>> {
+    static CACHE: OnceLock<Mutex<HashMap<String, CachedProbe>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Sonde un enregistrement (durée + résolution) pour la liste, via le cache.
+/// Un fichier en cours d'écriture (taille/mtime changeants) est re-sondé ; s'il
+/// n'a pas encore de durée connue, l'erreur est simplement remontée (l'UI
+/// n'affiche alors pas de méta pour cette ligne).
+#[tauri::command]
+async fn probe_recording(shared: SharedState<'_>, name: String) -> Result<ProbeInfo, String> {
+    if !valid_media_name(&name) {
+        return Err("fichier invalide".into());
+    }
+    let dir = shared.config_snapshot().output_dir;
+    let meta = std::fs::metadata(dir.join(&name)).map_err(|_| "fichier introuvable".to_owned())?;
+    let size = meta.len();
+    let mtime_ms = meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .and_then(|d| u64::try_from(d.as_millis()).ok())
+        .unwrap_or(0);
+    // Cache hit : taille ET mtime identiques.
+    if let Some(cached) = probe_cache().lock().expect("mutex cache").get(&name) {
+        if cached.size == size && cached.mtime_ms == mtime_ms {
+            return Ok(cached.info);
+        }
+    }
+    let media = clip::probe(&dir, &name)
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    let info = ProbeInfo {
+        duration_s: media.duration_s,
+        width: media.width,
+        height: media.height,
+    };
+    probe_cache().lock().expect("mutex cache").insert(
+        name,
+        CachedProbe {
+            size,
+            mtime_ms,
+            info,
+        },
+    );
+    Ok(info)
 }
 
 /// Durée (s) d'un enregistrement : l'interface de montage en a besoin pour
@@ -431,6 +554,7 @@ fn main() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             // Relancer le binaire ramène la fenêtre existante.
             show_main_window(app);
@@ -455,6 +579,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             get_status,
             set_enabled,
+            set_force_recording,
             get_config,
             set_config,
             get_app_version,
@@ -465,6 +590,7 @@ fn main() {
             clip_range,
             clip_live,
             media_duration,
+            probe_recording,
             open_recording,
             delete_recording,
             open_recordings_dir,
@@ -475,4 +601,58 @@ fn main() {
         ])
         .run(tauri::generate_context!())
         .expect("échec du démarrage de l'application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{is_safe_file_name, valid_media_name};
+
+    #[test]
+    fn accepte_les_noms_generes_par_lapp() {
+        for name in [
+            "discord-2026-07-25_15-30-00.mkv",
+            "discord-2026-07-25_15-30-00.mp4",
+            "discord-2026-07-25_15-30-00_720p.mp4",
+            "discord-2026-07-25_15-30-00_clip_0-30s.mp4",
+        ] {
+            assert!(valid_media_name(name), "devrait accepter : {name:?}");
+            assert!(is_safe_file_name(name));
+        }
+    }
+
+    /// Non-régression de l'injection de pipeline `GStreamer` : un nom porteur
+    /// d'un caractère de contrôle (tabulation/saut de ligne) — le vecteur qui
+    /// injecte `! filesink location=…` dans `gst-launch` — doit être refusé,
+    /// même s'il se termine par une extension média « valide ».
+    #[test]
+    fn rejette_linjection_par_caractere_de_controle() {
+        for hostile in [
+            "a\t! filesink location=owned.mkv",   // tabulation
+            "a\n!\nfilesink\nlocation=owned.mkv", // saut de ligne
+            "a\r! fakesink.mkv",                  // retour chariot
+            "a\x0b.mkv",                          // tabulation verticale
+            "a\x0c.mkv",                          // saut de page
+        ] {
+            assert!(
+                !valid_media_name(hostile),
+                "aurait dû rejeter (injection) : {hostile:?}"
+            );
+            assert!(!is_safe_file_name(hostile));
+        }
+    }
+
+    #[test]
+    fn rejette_les_separateurs_et_le_vide() {
+        for bad in ["", "../x.mkv", "sub/x.mkv", "sub\\x.mkv", "x.txt", "x"] {
+            assert!(!valid_media_name(bad), "aurait dû rejeter : {bad:?}");
+        }
+    }
+
+    /// L'espace est sûr (échappé par gst) : un nom de fichier avec espaces
+    /// reste accepté, on ne casse pas les fichiers légitimes de l'utilisateur.
+    #[test]
+    fn accepte_les_espaces() {
+        assert!(valid_media_name("ma session discord.mkv"));
+        assert!(is_safe_file_name("mon fichier"));
+    }
 }

@@ -58,6 +58,13 @@
         </div>
         <div class="deck-file" id="current-file">aucun enregistrement en cours</div>
       </div>
+      <div class="deck-transport">
+        <button type="button" class="btn transport-rec" id="manual-rec"
+                title="Démarrer/arrêter un enregistrement manuel (hors vocal)">
+          <span class="transport-dot" aria-hidden="true"></span>
+          <span id="manual-rec-label">REC manuel</span>
+        </button>
+      </div>
       <div class="deck-clip" id="deck-clip" hidden>
         <span class="deck-clip-label">CLIP&nbsp;DIRECT</span>
         <button type="button" class="btn btn-small clip-live-btn" data-min="0.5">✂ 30 s</button>
@@ -106,6 +113,24 @@
           <input type="checkbox" id="cfg-keep-last" />
           <span title="Au démarrage d'un nouvel enregistrement, supprime les précédents (.mkv). Vos clips/MP4 exportés ne sont jamais touchés.">Ne garder que le dernier enregistrement</span>
         </label>
+        <label class="field field-inline">
+          <input type="checkbox" id="cfg-auto-mp4" />
+          <span title="À l'arrêt d'un enregistrement, crée aussitôt un MP4 (remux sans perte, résolution source) à côté du MKV. Le MKV est conservé.">Créer un MP4 partageable à chaque arrêt</span>
+        </label>
+        <div class="field-row">
+          <label class="field">
+            <span title="Supprime les enregistrements .mkv plus vieux que N jours. 0 = désactivé. Vos exports MP4/clips ne sont jamais touchés.">Purge après (jours)</span>
+            <input type="number" id="cfg-retention-days" min="0" max="3650" step="1" />
+          </label>
+          <label class="field">
+            <span title="Si le total des enregistrements .mkv dépasse N Go, supprime les plus anciens. 0 = désactivé. Vos exports MP4/clips ne sont jamais touchés.">Limite disque (Go)</span>
+            <input type="number" id="cfg-retention-gb" min="0" max="100000" step="1" />
+          </label>
+          <label class="field">
+            <span title="Clip direct : secondes capturées APRÈS le clic (inclut la réaction qui suit). 0 = jusqu'au bord live. Le clip est produit avec ce délai.">Clip : marge après (s)</span>
+            <input type="number" id="cfg-clip-after" min="0" max="60" step="1" />
+          </label>
+        </div>
         <div class="field-row">
           <label class="field">
             <span>Vidéo kb/s</span>

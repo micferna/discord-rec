@@ -613,9 +613,26 @@ fn wait_for_completion(decode: &gst::Pipeline, mux: &gst::Pipeline) -> Result<()
     }
 }
 
-/// Durée (s) d'un fichier média, par préroll + requête. Sert à l'interface de
-/// montage (bornes des points d'entrée/sortie) et à la validation des clips.
+/// Infos d'un fichier média, récupérées en un seul préroll.
+#[derive(Clone, Copy)]
+pub struct MediaInfo {
+    /// Durée en secondes.
+    pub duration_s: f64,
+    /// Dimensions de la 1re piste vidéo, si présente (audio seul → `None`).
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+}
+
+/// Durée (s) d'un fichier média : commodité qui n'expose que la durée de
+/// `probe_media_info` (bornes du montage, validation des clips).
 pub(crate) fn media_duration_secs(path: &Path) -> Result<f64> {
+    Ok(probe_media_info(path)?.duration_s)
+}
+
+/// Sonde un fichier média par préroll : durée (requête) + dimensions de la 1re
+/// piste vidéo (lues dans les caps du pad décodé). Un seul passage pour les
+/// deux. Sert à enrichir la liste d'enregistrements (durée + résolution).
+pub(crate) fn probe_media_info(path: &Path) -> Result<MediaInfo> {
     gst::init().context("initialisation de GStreamer")?;
     let pipeline = gst::Pipeline::default();
     let filesrc = gst::ElementFactory::make("filesrc")
@@ -630,9 +647,25 @@ pub(crate) fn media_duration_secs(path: &Path) -> Result<f64> {
         .context("construction du pipeline de sonde")?;
     filesrc.link(&decodebin).context("filesrc → decodebin")?;
 
+    // Dimensions de la 1re piste vidéo rencontrée, remplies au pad_added.
+    let dims: Arc<Mutex<Option<(u32, u32)>>> = Arc::new(Mutex::new(None));
+
     // Chaque pad décodé est jeté dans un fakesink : on ne veut que prérouler.
     let pipeline_weak = pipeline.downgrade();
+    let dims_c = dims.clone();
     decodebin.connect_pad_added(move |_dbin, src_pad| {
+        // Si c'est une piste vidéo, on note ses dimensions (1re gagnante).
+        if let Some((w, h)) = src_pad
+            .current_caps()
+            .as_ref()
+            .and_then(|caps| caps.structure(0).map(video_dims))
+            .flatten()
+        {
+            let mut slot = dims_c.lock().expect("mutex dims sonde");
+            if slot.is_none() {
+                *slot = Some((w, h));
+            }
+        }
         let Some(pipeline) = pipeline_weak.upgrade() else {
             return;
         };
@@ -656,11 +689,27 @@ pub(crate) fn media_duration_secs(path: &Path) -> Result<f64> {
     } else {
         None
     };
+    let dims = *dims.lock().expect("mutex dims sonde");
     let _ = pipeline.set_state(gst::State::Null);
     let duration = duration.ok_or_else(|| anyhow!("durée inconnue"))?;
     // ns d'une durée média < 2^53 (jusqu'à ~104 jours) : conversion exacte.
     #[allow(clippy::cast_precision_loss)]
-    Ok(duration.nseconds() as f64 / 1e9)
+    let duration_s = duration.nseconds() as f64 / 1e9;
+    Ok(MediaInfo {
+        duration_s,
+        width: dims.map(|(w, _)| w),
+        height: dims.map(|(_, h)| h),
+    })
+}
+
+/// Largeur/hauteur d'une structure de caps `video/...`, si c'en est une.
+fn video_dims(structure: &gst::StructureRef) -> Option<(u32, u32)> {
+    if !structure.name().starts_with("video/") {
+        return None;
+    }
+    let w = u32::try_from(structure.get::<i32>("width").ok()?).ok()?;
+    let h = u32::try_from(structure.get::<i32>("height").ok()?).ok()?;
+    Some((w, h))
 }
 
 /// Récupère le 1er message d'erreur en attente sur le bus, pour un diagnostic.
@@ -750,9 +799,24 @@ pub async fn duration(output_dir: &Path, input_name: &str) -> Result<f64> {
         .context("tâche de sonde interrompue")?
 }
 
+/// Sonde (durée + dimensions) d'un enregistrement du dossier de sortie. Sert à
+/// enrichir la liste des enregistrements. Le préroll bloquant tourne hors du
+/// runtime async.
+pub async fn probe(output_dir: &Path, input_name: &str) -> Result<MediaInfo> {
+    let input = output_dir.join(input_name);
+    if !input.is_file() {
+        bail!("fichier introuvable : {input_name}");
+    }
+    tokio::task::spawn_blocking(move || probe_media_info(&input))
+        .await
+        .context("tâche de sonde interrompue")?
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{bitrate_kbps, media_duration_secs, run_clip, scaled_width, VideoEncoder};
+    use super::{
+        bitrate_kbps, media_duration_secs, probe_media_info, run_clip, scaled_width, VideoEncoder,
+    };
     use gstreamer as gst;
 
     #[test]
@@ -917,5 +981,50 @@ mod tests {
     #[test]
     fn clip_extracts_window_two_audio() {
         check_clip_window(2, false);
+    }
+
+    /// La sonde renvoie la durée (~20 s) ET les dimensions de la piste vidéo
+    /// (320×240) — ce qui alimente la liste enrichie (durée · résolution).
+    #[test]
+    fn probe_reports_duration_and_dims() {
+        let needed = [
+            "videotestsrc",
+            "audiotestsrc",
+            "x264enc",
+            "h264parse",
+            "matroskamux",
+            "opusenc",
+            "avdec_h264",
+            "opusdec",
+            "decodebin",
+        ];
+        if !elements_present(&needed) {
+            eprintln!("probe_reports_duration_and_dims : éléments GStreamer absents, test sauté");
+            return;
+        }
+        let runnable = std::process::Command::new(crate::recorder::gst_tool("gst-launch-1.0"))
+            .arg("--version")
+            .output()
+            .is_ok_and(|o| o.status.success());
+        if !runnable {
+            eprintln!("probe_reports_duration_and_dims : gst-launch-1.0 indisponible, test sauté");
+            return;
+        }
+
+        let dir = std::env::temp_dir().join(format!("disc-rec-probetest-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("dossier de test");
+        let src = dir.join("src.mkv");
+        let _ = std::fs::remove_file(&src);
+        generate_mkv(&src, 1);
+
+        let info = probe_media_info(&src).expect("sonde du MKV");
+        assert!(
+            (18.0..=22.0).contains(&info.duration_s),
+            "durée attendue ~20 s, obtenu {:.2} s",
+            info.duration_s
+        );
+        assert_eq!((info.width, info.height), (Some(320), Some(240)));
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

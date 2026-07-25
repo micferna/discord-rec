@@ -12,6 +12,9 @@ document.addEventListener("contextmenu", (e) => {
 });
 
 let startedAtMs = null;
+// Nom (sans chemin) de l'enregistrement en cours : on ne sonde pas ce fichier
+// (il grandit, durée inconnue).
+let currentRecordingName = null;
 
 /* ── Rendu de l'état ─────────────────────────────────────────── */
 
@@ -23,6 +26,9 @@ function setLed(el, on, color) {
 
 function render(status) {
   startedAtMs = status.recording ? status.started_at_ms : null;
+  currentRecordingName = status.file
+    ? status.file.split(/[\\/]/).pop()
+    : null;
 
   const tally = $("tally");
   tally.classList.toggle("on", status.recording);
@@ -36,6 +42,17 @@ function render(status) {
 
   // Clip direct (A) : visible seulement pendant un enregistrement.
   $("deck-clip").hidden = !status.recording;
+
+  // Bouton REC manuel : reflète l'état forcé et se désactive quand un
+  // enregistrement AUTO (vocal) est déjà en cours (rien à forcer).
+  const manual = $("manual-rec");
+  manual.classList.toggle("armed", status.forced);
+  $("manual-rec-label").textContent = status.forced ? "■ Arrêter" : "● REC manuel";
+  const autoRec = status.recording && !status.forced;
+  manual.disabled = autoRec;
+  manual.title = autoRec
+    ? "Enregistrement automatique (vocal) en cours"
+    : "Démarrer/arrêter un enregistrement manuel (hors vocal)";
 
   $("headline").textContent = !status.enabled
     ? "auto désactivé"
@@ -99,6 +116,10 @@ async function loadConfig() {
   $("cfg-denoise").checked = cfg.mic_denoise;
   $("cfg-audiomode").value = cfg.mix_audio ? "mixed" : "separate";
   $("cfg-keep-last").checked = cfg.keep_only_last;
+  $("cfg-auto-mp4").checked = cfg.auto_mp4;
+  $("cfg-retention-days").value = cfg.retention_days;
+  $("cfg-retention-gb").value = cfg.retention_max_gb;
+  $("cfg-clip-after").value = cfg.clip_after_s;
 }
 
 function flash(msg, ok) {
@@ -125,6 +146,10 @@ $("settings").addEventListener("submit", async (e) => {
         mix_audio: $("cfg-audiomode").value === "mixed",
         mic_denoise: $("cfg-denoise").checked,
         keep_only_last: $("cfg-keep-last").checked,
+        auto_mp4: $("cfg-auto-mp4").checked,
+        retention_days: Number($("cfg-retention-days").value),
+        retention_max_gb: Number($("cfg-retention-gb").value),
+        clip_after_s: Number($("cfg-clip-after").value),
       },
     });
     flash("réglages enregistrés ✓", true);
@@ -418,10 +443,33 @@ function buildFileActions(f) {
   return [open, del];
 }
 
+// Jeton d'annulation : un nouveau refresh invalide le remplissage de méta en
+// cours (évite deux boucles de sonde concurrentes qui écriraient les mêmes lignes).
+let mediaInfoToken = 0;
+
+// Remplit durée · résolution ligne par ligne, en séquentiel (jamais 30 sondes
+// simultanées). Le cache backend rend les rafraîchissements suivants instantanés.
+// Le fichier en cours d'écriture est sauté (durée inconnue).
+async function fillMediaInfo(rows, token) {
+  for (const { name, span } of rows) {
+    if (token !== mediaInfoToken) return; // un refresh plus récent a pris la main
+    if (name === currentRecordingName) continue;
+    try {
+      const p = await invoke("probe_recording", { name });
+      const parts = [fmtTimecode(p.duration_s)];
+      if (p.width && p.height) parts.push(`${p.height}p`);
+      span.textContent = parts.join(" · ");
+    } catch {
+      /* fichier illisible / en cours : pas de méta */
+    }
+  }
+}
+
 async function refreshRecordings() {
   const files = await invoke("list_recordings");
   const ul = $("recordings");
   ul.replaceChildren();
+  const token = ++mediaInfoToken;
   if (!files.length) {
     const li = document.createElement("li");
     li.className = "tape-empty";
@@ -429,11 +477,18 @@ async function refreshRecordings() {
     ul.appendChild(li);
     return;
   }
+  const rows = [];
   for (const f of files) {
     const li = document.createElement("li");
     const name = document.createElement("span");
     name.className = "tape-name";
-    name.textContent = f.name;
+    const filename = document.createElement("span");
+    filename.className = "tape-filename";
+    filename.textContent = f.name;
+    const info = document.createElement("span");
+    info.className = "tape-info";
+    name.append(filename, info);
+    rows.push({ name: f.name, span: info });
     const actions = document.createElement("span");
     actions.className = "tape-actions";
     const meta = document.createElement("span");
@@ -450,12 +505,24 @@ async function refreshRecordings() {
     li.append(name, actions, panel);
     ul.appendChild(li);
   }
+  fillMediaInfo(rows, token);
 }
 
 /* ── Actions globales ────────────────────────────────────────── */
 
 $("enabled").addEventListener("change", (e) => {
   invoke("set_enabled", { enabled: e.target.checked });
+});
+
+// REC manuel : bascule l'enregistrement forcé (hors vocal). L'état réel
+// revient via l'événement "status" (render), on n'anticipe pas l'affichage.
+$("manual-rec").addEventListener("click", async () => {
+  const turnOn = !$("manual-rec").classList.contains("armed");
+  try {
+    await invoke("set_force_recording", { on: turnOn });
+  } catch (err) {
+    showRecError(`REC manuel : ${err}`);
+  }
 });
 
 $("open-dir").addEventListener("click", async () => {

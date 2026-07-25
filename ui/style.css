@@ -363,6 +363,34 @@ h1 {
   text-align: left;
 }
 
+/* Barre transport : bouton REC manuel (hors vocal) */
+.deck-transport { display: flex; }
+.transport-rec {
+  display: inline-flex; align-items: center; gap: 8px;
+  width: 100%;
+  justify-content: center;
+  font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase;
+}
+.transport-dot {
+  width: 9px; height: 9px; border-radius: 50%;
+  background: var(--ink-3);
+  box-shadow: inset 0 1px 1px rgb(0 0 0 / 0.5);
+  transition: background 0.15s, box-shadow 0.15s;
+}
+.transport-rec.armed {
+  border-color: var(--rec-deep);
+  color: #ff8b80;
+  background: linear-gradient(180deg, #211417, #14151a);
+}
+.transport-rec.armed .transport-dot {
+  background: radial-gradient(circle at 38% 30%, #ff8c84, var(--rec));
+  box-shadow: 0 0 7px var(--rec), 0 0 14px rgb(255 59 48 / 0.4);
+  animation: transport-blink 1.1s ease-in-out infinite;
+}
+@keyframes transport-blink {
+  50% { box-shadow: 0 0 3px var(--rec), 0 0 7px rgb(255 59 48 / 0.25); }
+}
+
 /* ── Sous-modules (panneaux) ──────────────────────────────────── */
 
 .panel {
@@ -502,8 +530,12 @@ select option {
 .tape-list li:last-child { border-bottom: none; }
 .tape-list li:hover { background: rgb(255 255 255 / 0.022); }
 
-.tape-name { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
-.tape-name::before { content: "▪"; color: var(--ink-3); margin-right: 8px; }
+.tape-name { color: var(--ink); display: flex; align-items: baseline; gap: 8px; flex: 1; min-width: 0; }
+.tape-name::before { content: "▪"; color: var(--ink-3); flex: none; }
+.tape-filename { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+/* durée · résolution (rempli après-coup, discret) */
+.tape-info { color: var(--ink-3); flex: none; font-size: 10px; letter-spacing: 0.03em; font-variant-numeric: tabular-nums; }
+.tape-info:not(:empty)::before { content: "·"; margin-right: 8px; color: var(--rail-hi); }
 .tape-meta { color: var(--ink-2); flex: none; font-variant-numeric: tabular-nums; }
 
 .tape-actions { display: flex; align-items: center; gap: 7px; flex: none; }

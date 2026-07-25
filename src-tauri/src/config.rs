@@ -30,6 +30,22 @@ pub struct Config {
     /// nouvel enregistrement, les `discord-*.mkv` précédents sont supprimés
     /// (les MP4/clips exportés ne sont jamais touchés). Évite l'accumulation.
     pub keep_only_last: bool,
+    /// `true` = à l'arrêt d'un enregistrement, produire aussitôt un MP4 (remux
+    /// sans perte, résolution source) à côté du MKV : fichier lisible/partageable
+    /// partout sans action manuelle. Le MKV d'origine est conservé.
+    pub auto_mp4: bool,
+    /// Rétention par âge : supprime les enregistrements `discord-*.mkv` plus
+    /// vieux que ce nombre de jours (`0` = désactivé). Ne touche jamais aux
+    /// exports MP4/clips.
+    pub retention_days: u32,
+    /// Rétention par taille : si le total des `discord-*.mkv` dépasse ce nombre
+    /// de Go, supprime les plus anciens jusqu'à repasser sous le seuil (`0` =
+    /// désactivé). Ne touche jamais aux exports MP4/clips.
+    pub retention_max_gb: u32,
+    /// Clip direct : secondes capturées APRÈS l'instant du clic (`0` = jusqu'au
+    /// bord live). Permet d'inclure la réaction qui suit le moment clippé ; le
+    /// clip est alors produit avec ce petit délai.
+    pub clip_after_s: u32,
     /// Jeton du portail Wayland pour réutiliser la fenêtre choisie sans redemander.
     pub restore_token: Option<String>,
 }
@@ -51,6 +67,10 @@ impl Default for Config {
             mix_audio: true,
             mic_denoise: false,
             keep_only_last: false,
+            auto_mp4: false,
+            retention_days: 0,
+            retention_max_gb: 0,
+            clip_after_s: 0,
             restore_token: None,
         }
     }
@@ -63,6 +83,10 @@ impl Config {
         self.audio_bitrate_kbps = self.audio_bitrate_kbps.clamp(32, 510);
         self.framerate = self.framerate.clamp(5, 60);
         self.stop_debounce_s = self.stop_debounce_s.clamp(1, 120);
+        // `0` = désactivé ; sinon bornes raisonnables.
+        self.retention_days = self.retention_days.min(3650);
+        self.retention_max_gb = self.retention_max_gb.min(100_000);
+        self.clip_after_s = self.clip_after_s.min(60);
         if self
             .mic_target
             .as_deref()

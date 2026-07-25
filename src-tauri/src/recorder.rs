@@ -471,6 +471,22 @@ fn video_branch(
     }
 }
 
+/// Crée (ou tronque) le journal gstreamer du dossier de sortie. Sous Unix, il
+/// est resserré en lecture au seul propriétaire : il contient chemins et noms
+/// de périphériques (micro…). Créé vide, avant le spawn de gst — le resserrage
+/// précède donc toute écriture ; best-effort, un échec de chmod n'empêche pas
+/// l'enregistrement.
+fn create_gst_log(output_dir: &std::path::Path) -> Result<std::fs::File> {
+    let path = output_dir.join(".gstreamer.log");
+    let log = std::fs::File::create(&path).context("impossible de créer le journal gstreamer")?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+    }
+    Ok(log)
+}
+
 fn mux_tokens(args: &mut Vec<String>, file_name: &str) {
     args.push("matroskamux".into());
     args.push("name=mux".into());
@@ -528,8 +544,7 @@ impl Recording {
 
         // gst-launch écrit ses messages d'erreur sur stdout : on journalise
         // les deux flux dans le même fichier.
-        let log = std::fs::File::create(cfg.output_dir.join(".gstreamer.log"))
-            .context("impossible de créer le journal gstreamer")?;
+        let log = create_gst_log(&cfg.output_dir)?;
         let log_err = log.try_clone().context("clonage du journal gstreamer")?;
 
         let mut cmd = Command::new(gst_tool("gst-launch-1.0"));
