@@ -20,7 +20,7 @@ serde_json = "1"
 tokio = { version = "1", features = ["macros", "process", "rt-multi-thread", "sync", "time"] }
 anyhow = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
-dirs = "6"
+dirs = "7"
 tauri-plugin-updater = "2.10.1"
 # Montage/clip : coupe par temps d'un enregistrement. gst-launch (utilisé
 # partout ailleurs) ne sait pas couper par temps ; on pilote donc le pipeline
